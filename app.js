@@ -175,6 +175,12 @@ const IMG={
     this.lsKeys().forEach(k=>{ out[k.slice(this.P.length)]=localStorage.getItem(k)||''; });
     return out;
   },
+  async del(k){
+    try{ const db=await this.open(); await new Promise(res=>{
+      const t=db.transaction('imgs','readwrite'); t.objectStore('imgs').delete(k);
+      t.oncomplete=()=>res(); t.onerror=()=>res(); }); }catch(e){}
+    try{ localStorage.removeItem(this.P+k); }catch(e){}
+  },
   async clear(){
     try{ const db=await this.open(); await new Promise(res=>{
       const t=db.transaction('imgs','readwrite'); t.objectStore('imgs').clear();
@@ -351,7 +357,8 @@ function addMistake(o){
   const d=TODAY();
   const m={ id:uid(), date:d, taskId:o.taskId||'', stage:o.stage||'', tag:o.tag||'综合',
     topicTag:topicTagOf({tag:o.tag,topicTag:o.topicTag}), source:o.source||'', type:o.type||'calc',
-    question:o.question||'', imageKey:o.imageKey||'', childAnswer:o.childAnswer||'', correctAnswer:o.correctAnswer||'',
+    question:o.question||'', imageKey:o.imageKey||'', fileKey:o.fileKey||'', fileName:o.fileName||'', fileType:o.fileType||'',
+    childAnswer:o.childAnswer||'', correctAnswer:o.correctAnswer||'',
     reason:o.reason||'思路错误', note:o.note||'', cycleStart:d, reviews:mkReviews(d), streak:0, status:'active', history:[] };
   S.mistakes.unshift(m); save(); return m;
 }
@@ -791,7 +798,7 @@ function renderWrong(){
         ${m.status==='graduated'?'<span class="tag">已移出</span>':(due?'<span class="tag" style="color:var(--amber)">待复习</span>':'')}
       </div>
       <div class="wq">${esc(m.question||'（题目见图片）')}</div>
-      ${m.imageKey?`<div data-img-key="${esc(m.imageKey)}"></div>`:''}
+      ${m.imageKey?`<div data-img-key="${esc(m.imageKey)}"></div>`:''}${attachHTML(m)}
       <div class="wans">孩子答案：<b>${esc(m.childAnswer||'—')}</b> ｜ 正确答案：${esc(m.correctAnswer||'—')}</div>
       ${m.note?`<div class="wans">补充：${esc(m.note)}</div>`:''}
       ${m.status==='active'?`<div class="cycle">${cyc}<span class="next">下次复习：${next?esc(cnDate(next)):'—'} ｜ 连对 ${m.streak||0}/2</span></div>`:''}
@@ -851,7 +858,7 @@ function renderSettings(){
   updateSyncChip();
   updateStorageInfo();
 }
-function renderAll(){ renderHome(); renderTasks(); renderOverview(); renderLibrary(); renderWrong(); renderSettings(); renderPlan(); maybeNotify(); hydrateImages(document); }
+function renderAll(){ renderHome(); renderTasks(); renderOverview(); renderLibrary(); renderWrong(); renderSettings(); renderPlan(); maybeNotify(); hydrateImages(document); hydrateAttachments(document); }
 
 /* ---------------- 导航：页面历史栈 + 弹层历史栈（全站「返回上一页」） ---------------- */
 const NAV={ page:['home'], sheet:[] };
@@ -880,6 +887,7 @@ function openSheet(title,html,opts){
   $('#sheet').classList.remove('hidden');
   $('#sheetBody').scrollTop=0;
   hydrateImages($('#sheetBody'));
+  hydrateAttachments($('#sheetBody'));
 }
 function refreshSheet(title,html){ openSheet(title,html,{push:false}); }
 function closeSheet(){ $('#sheet').classList.add('hidden'); NAV.sheet=[]; }
@@ -1170,6 +1178,135 @@ function saveInbox(){
   save(); closeSheet(); LIBFILTER.tag=tag; renderAll(); goPage('library');
   toast('✓ 已归入「'+tag+'」专题');
 }
+
+/* ---------------- 批量附件：整份错题归档一次上传 ----------------
+   附件文件本体存 IndexedDB（跟题目照片一样，只在本设备）；
+   文件名 / 专题 / 上传日期 / 关联错题等文字信息存在 S.library，会随同步走。 */
+let ATTACH={file:null,dataURL:''};
+const ATT_MAX=8*1024*1024;             // 单份附件上限 8MB
+const ATT_URL={};                        // dataURL -> blobURL 缓存，避免反复创建
+function openAttachSheet(){
+  ATTACH={file:null,dataURL:''};
+  openSheet('上传附件 · 整份错题归档', `
+    <div class="card">
+      <h3>一次上传一整份错题</h3>
+      <p class="hint">试卷、错题合集、PDF、Word、图片都行。选好专题后存进「专题题库」，也可以同时放进错题本，按 1 / 3 / 7 天推给孩子重做。<b>不绑定当天任务，也不影响任务达标。</b></p>
+      <div class="btn-row"><button class="btn ghost" data-action="attach-pick">📎 选择附件</button></div>
+      <input type="file" id="attachFile" hidden>
+      <div id="attachInfo" class="attach-info">还没选文件</div>
+      <label class="lbl">归到哪个专题</label>
+      <select id="attachTag"><option value="">— 请选择专题 —</option>${TOPIC_LIST().map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}</select>
+      <label class="lbl">上传日期</label>
+      <input type="date" id="attachDate" value="${TODAY()}">
+      <label class="lbl">这份附件里有几道题（填 1 就整份当一题）</label>
+      <input type="number" id="attachCount" min="1" max="30" value="1">
+      <label class="lbl">备注（可不填）</label>
+      <input type="text" id="attachNote" placeholder="例如：三下第一单元测验卷，第 3、7 题错得多">
+      <label class="switch"><input type="checkbox" id="attachToWrong" checked><span>同时加入错题本（按 1/3/7 天推送重做）</span></label>
+      <div id="attachReasonWrap">
+        <label class="lbl">这批题主要错在哪</label>
+        <select id="attachReason">${D.reasons.map(r=>`<option value="${esc(r)}" ${r==='思路错误'?'selected':''}>${esc(r)}</option>`).join('')}</select>
+        <p class="hint">多道题会「一天一题」错开首次复习日，避免同一天全涌过来；每题仍走 1 / 3 / 7 天、连对 2 次移出的规则。</p>
+      </div>
+      <div class="btn-row"><button class="btn" data-action="attach-save">✓ 保存进专题题库</button></div>
+      <p class="hint">📌 附件文件本身只存在<b>上传时用的这台设备</b>（和题目照片一样，不跨设备同步）；文件名、专题、上传日期、关联错题会同步到手机和电脑。</p>
+    </div>`);
+}
+async function attachFilePicked(file){
+  if(!file) return;
+  if(file.size>ATT_MAX){ toast('文件超过 8MB，请压缩或拆成几份再传'); return; }
+  let data;
+  try{ data=await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error); r.readAsDataURL(file); }); }
+  catch(e){ toast('读取文件失败，请换一个文件'); return; }
+  ATTACH={file:file,dataURL:data};
+  const info=$('#attachInfo');
+  if(info) info.innerHTML=`<b>📎 ${esc(file.name)}</b><small>${(file.size/1024).toFixed(0)} KB ｜ ${esc(file.type||'未知格式')}</small>`;
+}
+function attachLabel(name,type){
+  const t=String(type||''), n=String(name||'');
+  if(t.indexOf('image/')===0 || /\.(png|jpe?g|gif|webp)$/i.test(n)) return '🖼 图片';
+  if(t.indexOf('pdf')>=0 || /\.pdf$/i.test(n)) return '📄 PDF';
+  if(/word|docx?/i.test(t) || /\.docx?$/i.test(n)) return '📝 Word';
+  return '📎 附件';
+}
+/* 附件展示槽：先放占位，稍后由 hydrateAttachments 异步填出「打开/下载」 */
+function attachHTML(m){
+  if(!m||!m.fileKey) return '';
+  return `<div class="att-slot" data-file-key="${esc(m.fileKey)}" data-file-name="${esc(m.fileName||'附件')}" data-file-type="${esc(m.fileType||'')}" data-file-label="${esc(attachLabel(m.fileName,m.fileType))}"></div>`;
+}
+function attBlobURL(key,src){
+  if(ATT_URL[key]) return ATT_URL[key];
+  try{
+    if(!/^data:/.test(src)||!window.atob||!window.Blob||!URL.createObjectURL) return src;
+    const comma=src.indexOf(','), head=src.slice(0,comma), b64=src.slice(comma+1);
+    const mime=(head.match(/data:([^;]+)/)||[])[1]||'application/octet-stream';
+    const bin=atob(b64), arr=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+    const u=URL.createObjectURL(new Blob([arr],{type:mime}));
+    ATT_URL[key]=u; return u;
+  }catch(e){ return src; }
+}
+async function hydrateAttachments(root){
+  const slots=(root||document).querySelectorAll('[data-file-key]');
+  for(const s of slots){
+    if(s.dataset.attLoaded==='1') continue;
+    const key=s.dataset.fileKey, name=s.dataset.fileName||'附件', type=s.dataset.fileType||'', label=s.dataset.fileLabel||'📎 附件';
+    const src=await IMG.get(key);
+    if(!src){ s.innerHTML=`<div class="att-missing">${esc(label)} ${esc(name)}<small>文件在上传的那台设备上，本设备打不开（文字记录已同步）</small></div>`; s.dataset.attLoaded='1'; continue; }
+    const isImg=type.indexOf('image/')===0 || /^data:image\//.test(src);
+    const url=attBlobURL(key,src);
+    s.innerHTML=`<div class="att-file">
+      ${isImg?`<img class="thumb" src="${esc(src)}" alt="${esc(name)}">`:''}
+      <div class="att-meta"><b>${esc(label)} ${esc(name)}</b>
+        <div class="btn-row">
+          <a class="btn small ghost" href="${esc(url)}" target="_blank" rel="noopener">👁 打开</a>
+          <a class="btn small ghost" href="${esc(url)}" download="${esc(name)}">⬇ 下载</a>
+        </div></div></div>`;
+    s.dataset.attLoaded='1';
+  }
+}
+async function saveAttach(){
+  if(!ATTACH.file||!ATTACH.dataURL){ toast('请先选择附件'); return; }
+  const tag=$('#attachTag')?$('#attachTag').value:'';
+  if(!tag){ toast('请先选择这份附件属于哪个专题'); return; }
+  const at=$('#attachDate')?($('#attachDate').value||TODAY()):TODAY();
+  const n=Math.max(1,Math.min(30,parseInt($('#attachCount')?$('#attachCount').value:'1',10)||1));
+  const note=$('#attachNote')?$('#attachNote').value.trim():'';
+  const toWrong=!!($('#attachToWrong')&&$('#attachToWrong').checked);
+  const reason=$('#attachReason')?$('#attachReason').value:'思路错误';
+  const f=ATTACH.file, id=uid(), key='att:'+id;
+  try{ await IMG.put(key,ATTACH.dataURL); }
+  catch(e){ toast((e&&e.message)||'附件保存失败'); return; }
+  const fileName=f.name||'附件', fileType=f.type||'', fileSize=f.size||0;
+  S.library.push({ id, at, tag, kind:'file',
+    text:`📎 附件《${fileName}》（共 ${n} 题，打开文件作答）`,
+    fileName, fileType, fileSize, fileKey:key, questionCount:n,
+    childAnswer:'', correctAnswer:'', note, source:'批量附件', auto:false, confidence:'无' });
+  if(toWrong){
+    for(let i=0;i<n;i++){
+      const label=n>1?`附件《${fileName}》第 ${i+1} 题（打开文件作答）`:`附件《${fileName}》（打开文件作答）`;
+      const m=addMistake({taskId:'',stage:'批量附件',tag,topicTag:tag,type:'word',source:'批量附件',
+        question:label, fileKey:key, fileName, fileType,
+        childAnswer:'', correctAnswer:'', reason, note });
+      const base=addDays(at,i);                 // 多题错开：第 i 题整体后移 i 天
+      m.date=at; m.cycleStart=base; m.reviews=mkReviews(base);
+    }
+  }
+  save(); closeSheet(); LIBFILTER.tag=tag; renderAll(); goPage('library');
+  toast(toWrong?`✓ 已存进「${tag}」，并加入错题本 ${n} 题`:`✓ 已存进「${tag}」专题题库`);
+}
+function attachCardHTML(x){
+  return `<div class="lib-card att-card">
+    <div class="lib-meta">${esc(x.at)} ｜ ${esc(x.tag)} ｜ 📎 批量附件 ｜ ${esc(x.questionCount||1)} 题</div>
+    <div class="lib-q">${esc(x.fileName||'附件')} <small>${((x.fileSize||0)/1024).toFixed(0)} KB</small></div>
+    ${attachHTML(x)}
+    ${x.note?`<div class="lib-q"><small>备注：${esc(x.note)}</small></div>`:''}
+    <div class="btn-row"><button class="btn small ghost" data-action="lib-delete" data-id="${esc(x.id)}">删除</button></div>
+    <div class="lib-foot"><span style="font-size:12px;color:var(--faint)">改判专题：</span>
+      <select class="lib-retag" data-id="${esc(x.id)}">${TOPIC_LIST().map(t=>`<option value="${esc(t)}" ${x.tag===t?'selected':''}>${esc(t)}</option>`).join('')}</select>
+    </div>
+  </div>`;
+}
 function renderLibrary(){
   const dir=$('#libraryDir'); if(!dir) return;
   const all=S.library||[], tags=TOPIC_LIST(), counts={};
@@ -1188,11 +1325,11 @@ function renderLibrary(){
     :'<p class="hint">还没有录入的题目。点上面「随手录一道题」开始，题会自动归到对应专题。</p>';
   const kw=(LIBFILTER.kw||'').trim();
   const list=all.filter(x=>(!LIBFILTER.tag||x.tag===LIBFILTER.tag)&&
-    (!kw||(x.text||'').indexOf(kw)>=0||(x.note||'').indexOf(kw)>=0)).slice().reverse();
+    (!kw||(x.text||'').indexOf(kw)>=0||(x.note||'').indexOf(kw)>=0||(x.fileName||'').indexOf(kw)>=0)).slice().reverse();
   $('#librarySummary').innerHTML=`<span>累计录入 <b>${all.length}</b></span><span>有题的专题 <b>${dirTags.length}</b></span><span>当前显示 <b>${list.length}</b></span>`;
   const box=$('#libraryList');
   if(!list.length){ box.innerHTML='<div class="card"><p class="hint">没有符合条件的题目。</p></div>'; return; }
-  box.innerHTML=list.map(x=>`<div class="lib-card">
+  box.innerHTML=list.map(x=>x.kind==='file'?attachCardHTML(x):`<div class="lib-card">
     <div class="lib-meta">${esc(x.at)} ｜ ${esc(x.tag)} ｜ ${esc(x.source||'随手录入')} ｜ ${x.auto?'系统判别 · 把握'+esc(x.confidence||'—'):'家长指定专题'}</div>
     <div class="lib-q">${esc(x.text||'（题目见图片）')}</div>
     ${x.imageKey?`<div data-img-key="${esc(x.imageKey)}"></div>`:''}
@@ -1208,6 +1345,7 @@ function renderLibrary(){
     </div>
   </div>`).join('');
   hydrateImages(box);
+  hydrateAttachments(box);
 }
 function libAnswer(el){
   const host=el.closest('.lib-card')||el.closest('.ex-card');
@@ -1394,7 +1532,7 @@ function browseCardHTML(m,no,picked){
       <span class="tag">${m.type==='calc'?'计算题':'应用题'}</span>
     </div>
     <div class="bt">${esc(m.question||'（题目见图片，点查看详情）')}</div>
-    ${m.imageKey?`<div class="bf-img" data-img-key="${esc(m.imageKey)}"></div>`:''}
+    ${m.imageKey?`<div class="bf-img" data-img-key="${esc(m.imageKey)}"></div>`:''}${attachHTML(m)}
     <div class="wans">下次复习：${next?esc(cnDate(next)):'—'} ｜ 连对 ${m.streak||0}/2</div>
     <details class="bf-ans"><summary>👁 看正确答案（决定重做前先别点）</summary>
       <div>孩子当初答：<b style="color:var(--red)">${esc(m.childAnswer||'—')}</b> ｜ 正确答案：<b>${esc(m.correctAnswer||'—')}</b></div>
@@ -1518,6 +1656,7 @@ function bfSyncSel(list,allN){
     const k=h.dataset.g, arr=list.filter(m=>bfGroupKey(m)===k);
     c.textContent=`${arr.length} 题 · 已选 ${arr.filter(m=>BROWSE.sel[m.id]).length} · 点标题收起 / 展开`;
   });
+  hydrateAttachments(document);
 }
 function openWrongBrowse(){
   resetSheet('在册错题 · 筛选预览与重做', browseShellHTML());
@@ -1531,7 +1670,7 @@ function openWrongDetail(id){
     <div class="detail-box">
       <h3>错题详情</h3>
       <div class="bigq">${esc(m.question||'（题目见图片）')}</div>
-      ${m.imageKey?`<div data-img-key="${esc(m.imageKey)}"></div>`:''}
+      ${m.imageKey?`<div data-img-key="${esc(m.imageKey)}"></div>`:''}${attachHTML(m)}
       <div class="rowline"><div class="k">错题日期</div><div class="v">${esc(m.date)}</div></div>
       <div class="rowline"><div class="k">所属任务</div><div class="v">${esc(m.taskId||'—')} ｜ ${esc(m.stage)}</div></div>
       <div class="rowline"><div class="k">类型 / 标签</div><div class="v">${m.type==='calc'?'计算题':'应用题'} ｜ ${esc(m.tag)}</div></div>
@@ -1569,7 +1708,7 @@ function redoHTML(m){
     <h3>${esc(m.stage)} · ${esc(m.tag)}（${esc(pos)}）</h3>
     <div class="redo-hide">先自己想，答案暂时藏起来了。写完再点「提交并对照答案」。</div>
     <div class="bigq">${esc(m.question||'（题目见图片）')}</div>
-    ${m.imageKey?`<div data-img-key="${esc(m.imageKey)}"></div>`:''}
+    ${m.imageKey?`<div data-img-key="${esc(m.imageKey)}"></div>`:''}${attachHTML(m)}
     <label class="lbl">这次的答案</label>
     <input type="text" id="redoAnswer" placeholder="把答案写在这里">
     <div id="redoResult"></div>
@@ -1645,6 +1784,7 @@ async function exportPrint(){
       <div style="font-size:12px;color:#666">${i+1}. ${esc(m.date)} ｜ ${esc(m.stage)} ｜ ${esc(m.tag)} ｜ ${esc(m.reason)} ｜ ${m.type==='calc'?'计算题':'应用题'}</div>
       <div style="font-size:14px;margin:6px 0">${esc(m.question||'（题目见图片）')}</div>
       ${pics[m.id]?`<img class="thumb" src="${pics[m.id]}" alt="题目图片" style="max-height:150px">`:''}
+      ${m.fileName?`<div style="font-size:12px;color:#666">📎 见附件：${esc(m.fileName)}</div>`:''}
       <div style="font-size:12px;color:#666">孩子答案：${esc(m.childAnswer||'—')} ｜ 正确答案：${esc(m.correctAnswer||'—')}</div>
       ${m.note?`<div style="font-size:12px;color:#666">备注：${esc(m.note)}</div>`:''}
       <div style="border-top:1px dashed #ccc;margin-top:10px;padding-top:6px;font-size:12px;color:#999">重做区：____________________________________________</div>
@@ -1801,10 +1941,10 @@ function buildMasteryTest(t){
   const calcItems=cp.items.map(q=>({kind:'calc',tag:q.tag,stem:q.stem,ans:q.ans,graded:'auto',given:'',ok:null}));
   const tag=t.topicTag, wordItems=[];
   (S.mistakes||[]).filter(m=>m.status==='active'&&topicTagOf(m)===tag).slice(0,2)
-    .forEach(m=>wordItems.push({kind:'word',cat:tag,src:'错题',stem:m.question,imgKey:m.imageKey,ans:m.correctAnswer,childAns:m.childAnswer,graded:'manual',verdict:null,reason:m.reason||''}));
+    .forEach(m=>wordItems.push({kind:'word',cat:tag,src:'错题',stem:m.question,imgKey:m.imageKey,fileKey:m.fileKey||'',fileName:m.fileName||'',fileType:m.fileType||'',ans:m.correctAnswer,childAns:m.childAnswer,graded:'manual',verdict:null,reason:m.reason||''}));
   let need=Math.max(0,4-wordItems.length);
   if(need>0){ try{ (window.makeVariants?window.makeVariants(tag,need,GUIDE[tag]):[]).forEach(v=>wordItems.push({kind:'word',cat:tag,src:'变式',stem:v.q,ans:v.ans,sol:v.sol,graded:'manual',verdict:null,reason:''})); }catch(e){} need=Math.max(0,4-wordItems.length); }
-  if(need>0){ (S.library||[]).filter(x=>x.tag===tag).slice(0,need).forEach(x=>wordItems.push({kind:'word',cat:tag,src:'题库',stem:x.text,imgKey:x.imageKey,ans:x.correctAnswer,graded:'manual',verdict:null,reason:''})); need=Math.max(0,4-wordItems.length); }
+  if(need>0){ (S.library||[]).filter(x=>x.tag===tag).slice(0,need).forEach(x=>wordItems.push({kind:'word',cat:tag,src:'题库',stem:x.text,imgKey:x.imageKey,fileKey:x.fileKey||'',fileName:x.fileName||'',fileType:x.fileType||'',ans:x.correctAnswer,graded:'manual',verdict:null,reason:''})); need=Math.max(0,4-wordItems.length); }
   if(need>0){ ((GUIDE[tag]||{}).examples||[]).slice(0,need).forEach(e=>wordItems.push({kind:'word',cat:tag,src:'例题',stem:e.q,ans:e.ans,sol:e.sol,graded:'manual',verdict:null,reason:''})); }
   return {taskId:t.id, items:calcItems.concat(wordItems), submitted:false, rate:null, passed:null, wrong:[]};
 }
@@ -1818,11 +1958,13 @@ function renderMastery(){
         ? `<div class="q-item" id="mtq-${i}"><span class="qn">${i+1}</span><span class="qs">${esc(it.stem)}</span><input type="text" inputmode="decimal" data-mi="${i}" placeholder="答案"><span class="mark"></span></div>`
         : `<div class="q-item word" id="mtq-${i}"><span class="qn">${i+1}</span><div class="qw-body">
              <div class="qs">${it.imgKey?`<img class="thumb" data-img-key="${esc(it.imgKey)}">`:''}${esc(it.stem)}</div>
+             ${attachHTML(it)}
              <details><summary>👁 看正确答案</summary><div class="ex-ans">答案：${esc(it.ans||'(请家长核对)')}</div>${it.sol?`<ol>${it.sol.map(s=>`<li>${esc(s)}</li>`).join('')}</ol>`:''}</div></details>
              <div class="verdict-row"><span>孩子做：</span><button class="vbtn ${it.verdict===true?'on':''}" data-action="mt-verdict" data-i="${i}" data-v="1">✓ 对</button><button class="vbtn ${it.verdict===false?'on':''}" data-action="mt-verdict" data-i="${i}" data-v="0">✕ 错</button><small class="vsrc">来源：${esc(it.src)}</small></div>
            </div></div>`).join('')}
       <div class="btn-row"><button class="btn" data-action="submit-mastery">提交判分（≥80% 过关）</button></div></div>`;
     hydrateImages(box);
+    hydrateAttachments(box);
   } else {
     const total=MT.items.length, correct=MT.items.filter(it=>it.kind==='calc'?it.ok:it.verdict===true).length;
     box.innerHTML=`<div class="result-box ${MT.passed?'':'bad'}">本次正确率 <b>${MT.rate}%</b>（${correct}/${total}）｜ 过关线 80% ｜ ${MT.passed?'✅ 通过':'❌ 未通过'}</div>`
@@ -1918,11 +2060,21 @@ document.addEventListener('click',e=>{
     case 'open-inbox': openInbox(); break;
     case 'inbox-photo': { const f=$('#inboxFile'); if(f) f.click(); break; }
     case 'inbox-save': saveInbox(); break;
+    case 'open-attach': openAttachSheet(); break;
+    case 'attach-pick': { const f=$('#attachFile'); if(f) f.click(); break; }
+    case 'attach-save': saveAttach(); break;
     case 'pick-topic': { const s=$('#inboxTag'); if(s){ s.value=id; toast('已改判为「'+id+'」'); } break; }
     case 'lib-filter': LIBFILTER.tag=id||''; renderLibrary(); break;
     case 'lib-answer': libAnswer(el); break;
     case 'lib-delete': {
-      if(!confirm('删掉这道随手录入的题？不影响任务进度和错题本。')) break;
+      const it=(S.library||[]).find(x=>x.id===id);
+      if(!confirm(it&&it.kind==='file'
+        ? '删掉这份附件？（文件会从本机删除；关联的错题会保留文字，但附件链接会失效）'
+        : '删掉这道随手录入的题？不影响任务进度和错题本。')) break;
+      if(it&&it.fileKey){
+        IMG.del(it.fileKey);
+        (S.mistakes||[]).forEach(m=>{ if(m.fileKey===it.fileKey){ delete m.fileKey; delete m.fileName; delete m.fileType; } });
+      }
       S.library=S.library.filter(x=>x.id!==id); save(); renderAll(); toast('已删除'); break; }
     case 'variants': openVariants(id); break;
     case 'var-answer': varAnswer(el); break;
@@ -2026,8 +2178,10 @@ document.addEventListener('change',e=>{
   const t=e.target;
   if(t.id==='restoreFile'&&t.files[0]){ restore(t.files[0]); t.value=''; return; }
   if((t.id==='wordFile'||t.id==='inboxFile')&&t.files[0]){ handlePhoto(t.files[0]); return; }
+  if(t.id==='attachFile'&&t.files[0]){ attachFilePicked(t.files[0]); return; }
   if(t.id==='taskStageFilter'||t.id==='taskStateFilter'){ renderTasks(); return; }
   if(t.id==='inboxWrong'){ const w=$('#inboxReasonWrap'); if(w) w.classList.toggle('hidden',!t.checked); return; }
+  if(t.id==='attachToWrong'){ const w=$('#attachReasonWrap'); if(w) w.classList.toggle('hidden',!t.checked); return; }
   if(t.id==='bfFrom'||t.id==='bfTo'){
     BROWSE.from=$('#bfFrom')?$('#bfFrom').value:''; BROWSE.to=$('#bfTo')?$('#bfTo').value:'';
     BROWSE.quick='custom'; BROWSE.collapsed={}; renderBrowse(); return; }
