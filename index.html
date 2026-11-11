@@ -59,7 +59,17 @@
 
   <!-- ========== 阶段时间线 / 进度规划 ========== -->
   <section class="page" id="page-plan">
-    <div class="page-head"><h2>阶段时间线 · 进度规划</h2><p>每个阶段按南宁校历给出起止日期；系统把阶段时长均摊到各任务，给出「建议完成窗口」。下方可填写每道题的<b>实际开始 / 结束日</b>，自动对比「提前 / 准时 / 滞后」。日期为预测值的会在日历卡上标注「预测」，官方公布后请在「家长设置 → 校历校准」调整。</p></div>
+    <div class="page-head"><h2>阶段时间线 · 进度规划</h2><p>每个阶段按南宁校历给出起止日期；系统把阶段时长均摊到各任务，给出「建议完成窗口」。下方可填写每道题的<b>实际开始 / 结束日</b>，自动对比「提前 / 准时 / 滞后」。日期为预测值的会在日历卡上标注「预测」，官方公布后请在「家长设置 → 校历校准」调整。</p>    </div>
+    <div class="card day-entry">
+      <h3>📅 按日期回看 / 补录</h3>
+      <p class="hint">规划表是按周排的；想看具体某一天（比如周一）做了什么、或补录那天的题，点这里。</p>
+      <div class="btn-row">
+        <button class="btn small" data-action="go-day" data-v="-1">看昨天</button>
+        <button class="btn small ghost" data-action="go-day" data-v="mon">看本周一</button>
+        <button class="btn small ghost" data-action="go-day" data-v="pick">📅 自选日期</button>
+        <button class="btn small ghost" data-action="go-day" data-v="today">回到今天</button>
+      </div>
+    </div>
     <div id="planList"></div>
     <p class="hint" style="margin-top:4px">说明：S4–S8 为按校历规律推算的「预测」值，已在日历卡上标注「预测」。如要微调，直接改 <b>calendar.js</b> 里对应阶段的 <code>start/end</code> 即可，保存刷新页面即生效（也可把官方公布日期发我，我来改）。</p>
   </section>
@@ -67,6 +77,16 @@
   <!-- ========== 任务序列 ========== -->
   <section class="page" id="page-tasks">
     <div class="page-head"><h2>任务序列</h2><p>按编号线性推进，不绑定日期；卡住就原地反复练，达标后才顺延。</p></div>
+    <div class="card day-entry">
+      <h3>📅 按日期回看 / 补录</h3>
+      <p class="hint">昨天漏记的题、周一做过的任务、想提前看某天的安排，点这里打开；补录的内容会自动记到那一天。</p>
+      <div class="btn-row">
+        <button class="btn small" data-action="go-day" data-v="-1">看昨天</button>
+        <button class="btn small ghost" data-action="go-day" data-v="mon">看本周一</button>
+        <button class="btn small ghost" data-action="go-day" data-v="pick">📅 自选日期</button>
+        <button class="btn small ghost" data-action="go-day" data-v="today">回到今天</button>
+      </div>
+    </div>
     <div class="btn-row">
       <button class="btn ghost" data-action="go-overview">📚 查看阶段总览：每阶段多少任务、分别是什么</button>
       <button class="btn ghost" data-action="open-inbox">📥 随手录题（不绑定本任务）</button>
@@ -204,8 +224,8 @@
     <div class="card">
       <h3>跨设备同步（GitHub 文件同步）</h3>
       <p class="hint">手机 / 学习机 / 网页共用同一份数据：数据存成仓库里的 <code>sync.json</code>，每次改动自动同步。需一次性配置 GitHub 仓库与访问令牌（步骤见聊天里的「部署与同步步骤」）。错题/随手录题的<b>照片</b>存在各设备本地，不同步（题目文字会同步）。</p>
-      <label class="lbl">同步仓库（默认 beibei43/math-workbench）</label>
-      <input type="text" id="setRepo" placeholder="beibei43/math-workbench" autocomplete="off">
+      <label class="lbl">同步仓库（格式：用户名/仓库名）</label>
+      <input type="text" id="setRepo" placeholder="beibei43/math-workbench-DOMI" autocomplete="off">
       <label class="lbl">GitHub 访问令牌（Personal Access Token，需 repo 权限）</label>
       <input type="password" id="setToken" placeholder="ghp_… 或 github_pat_…" autocomplete="off">
       <div class="btn-row">
@@ -218,6 +238,7 @@
     <div class="card">
       <h3>部署与说明</h3>
       <p class="hint">纯静态网页，无账号、无服务器：整个文件夹上传到任意静态托管即可；也可直接双击 index.html 在电脑 / 手机 / 学习机浏览器打开。数据保存在当前浏览器的 localStorage 与 IndexedDB，<b>换浏览器或清理缓存前请先导出备份</b>。直接双击打开（file://）时若浏览器禁用 IndexedDB，照片会自动改存 localStorage（容量较小，建议更勤地备份）。拍照 OCR 首次需联网下载中文识别包；离线时可手动输入题目文字，原图仍会保存。题型判别是本地关键词规则，不是 AI 理解，判错时在下拉里改一下即可。</p>
+      <p class="hint">程序版本：<b id="appVer">—</b>　（更新后这里数字没变，说明浏览器还在用旧缓存：把工作台完全关掉再打开一次即可）</p>
     </div>
   </section>
 </main>

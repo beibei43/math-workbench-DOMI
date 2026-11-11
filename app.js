@@ -6,6 +6,7 @@
 const $  = s => document.querySelector(s);
 const $$ = s => Array.prototype.slice.call(document.querySelectorAll(s));
 const D  = window.APP_DATA;
+const APP_VER = 'v15';   /* 界面上可见的版本号：更新后数字变了，说明新文件已生效 */
 const GUIDE = window.TOPIC_GUIDE || {};
 const CALC = window.CALC_GUIDE || {};
 const TASKS = D.tasks;
@@ -322,7 +323,7 @@ function makePaper(task, oralN, writtenN, fixedTag){
   const tag=fixedTag||effectiveTag(task), fn=GEN[tag]||GEN.mixed, items=[];
   for(let i=0;i<oralN;i++)  items.push(Object.assign({kind:'口算',tag:tag,key:uid()},fn('oral')));
   for(let i=0;i<writtenN;i++)items.push(Object.assign({kind:'笔算',tag:tag,key:uid()},fn('written')));
-  return {tag:tag,items:items,at:new Date().toISOString()};
+  return {tag:tag,fixedTag:fixedTag||'',items:items,at:new Date().toISOString()};
 }
 function norm(a){
   let s=String(a==null?'':a).trim()
@@ -470,9 +471,21 @@ function calcLearnStrip(t){
 }
 function openCalcGuide(tag){
   if(!CALC[tag]){ toast('这个知识点还没有讲解'); return; }
+  const canPractice=!!calcTagKey(tag);
   openSheet('计算讲解 · '+calcName(tag), `<div class="card"><h3>${esc(calcName(tag))}</h3>
-    <p class="hint">知识点讲解，不影响任务进度；看完点左上「‹」返回。</p></div>
+    <p class="hint">知识点讲解，不影响任务进度；看完点左上「‹」返回。</p>
+    ${canPractice?`<div class="btn-row"><button class="btn small" data-action="calc-practice" data-id="${esc(tag)}">✏️ 练一套这个知识点</button></div>`:''}</div>
     <div class="card">${calcGuideHTML(tag,null)}</div>`);
+}
+/* 家长想给某个旧知识点加练：单独出一套该知识点的题，仍记到当前选中日期 */
+function practiceCalcTag(tag){
+  const k=calcTagKey(tag), t=currentTask()||TASKS[0];
+  if(!k||!GEN[k]||!t){ toast('这个知识点暂时不能单独出题'); return; }
+  const o=Math.max(2,Math.round(clamp(S.settings.oralCount,0,60)*0.6));
+  const w=Math.max(1,Math.round(clamp(S.settings.writtenCount,0,60)*0.6));
+  const paper=makePaper(t,o,w,k); paper.isDaily=false;
+  openCalc(t.id,paper);
+  const box=$('#paperBox'); if(box&&box.scrollIntoView) box.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
 /* 专题讲解：是什么 + 底层逻辑 + 解题要点 + 易错点 + 典型例题（答案默认折叠） */
@@ -661,7 +674,7 @@ function dailyPanelHTML(t){
   const weekRange = wp&&wp.start ? `${cnDate(wp.start)}–${cnDate(wp.end)}` : '';
   const subIdx = (wp&&wp.hard&&!wp.compress&&wp.start) ? Math.min(2,Math.max(1,Math.floor(dayDiff(wp.start,d0)/7)+1)) : 1;
   const thisDay = isT?'今天':'这天';
-  return `<div class="stage-head">任务 · 按日期查看<small>每周约 ${WEEKLY_HOURS} 小时 · 点任意一天回看 / 补录</small></div>
+  return `<div class="stage-head">任务 · 按日期查看 <span class="ver-tag">${APP_VER}</span><small>每周约 ${WEEKLY_HOURS} 小时 · 点任意一天回看 / 补录</small></div>
   <div class="day-nav">
     <button type="button" class="dn-arrow" data-action="day-shift" data-v="-1" aria-label="前一天">‹</button>
     <label class="dn-pick"><span>${isT?'今天':(d0<TODAY()?'回看':'预览')}</span><input type="date" id="dayPick" value="${d0}"></label>
@@ -685,6 +698,7 @@ function dailyPanelHTML(t){
         <div class="dc-h">① 计算 <span class="dc-tag">每天必做</span></div>
         <p class="dc-sub">本任务：${esc(calcName(t.calcTag))} ${calcIsNew(t)?'· 新学':'· 保温'} ｜ 建议 ${esc(t.calcCount)}</p>
         <p class="dc-sub">${thisDay}：${calcDone?'✅ 已做':(dayRate!==null?'✅ 已做 · 正确率'+dayRate+'%':'⭕ 还没做')}</p>
+        <p class="dc-sub">🔁 今日旧知识保温：${esc(reviewPool(t).slice(0,2).map(k=>calcName(k)).join(' · ')||'暂无')}</p>
         <div class="btn-row"><button class="btn" data-action="daily-calc" data-id="${esc(t.id)}">${isT?'做今日计算':'✚ 补录这天的计算'}</button></div>
       </div>
       <div class="dc-block topic">
@@ -939,7 +953,9 @@ function renderSettings(){
   updateSyncChip();
   updateStorageInfo();
 }
-function renderAll(){ renderHome(); renderTasks(); renderOverview(); renderLibrary(); renderWrong(); renderSettings(); renderPlan(); maybeNotify(); hydrateImages(document); hydrateAttachments(document); }
+function renderAll(){ renderHome(); renderTasks(); renderOverview(); renderLibrary(); renderWrong(); renderSettings(); renderPlan(); maybeNotify(); hydrateImages(document); hydrateAttachments(document);
+  const av=$('#appVer'); if(av) av.textContent=APP_VER;
+}
 
 /* ---------------- 导航：页面历史栈 + 弹层历史栈（全站「返回上一页」） ---------------- */
 const NAV={ page:['home'], sheet:[] };
@@ -1018,6 +1034,7 @@ function openCalc(id,preset){
     <div class="card">
       <h3>${esc(t.calcText)}</h3>
       <p class="hint">知识点：${esc(calcName(t.calcTag))} · ${calcIsNew(t)?'新学（建议先看下面讲解再做题）':'保温复习'} ｜ ${esc(t.calcCount)}${(t.calcTag==='mixed'||t.calcTag==='decmix')?' ｜ 保温题会从本阶段已学知识点里随机抽':''}</p>
+      ${PAPER&&PAPER.fixedTag?`<p class="hint">✏️ 专项练习：<b>${esc(calcName(PAPER.fixedTag))}</b>。本套及后面「换一组」都只出这个知识点，适合给忘了的旧知识加练。</p>`:''}
       ${PAPER_DATE!==TODAY()?`<p class="hint">⏪ 补录模式：这套练习和产生的错题都会记到 <b>${esc(cnDate(PAPER_DATE))}</b>。</p>`:''}
       <details class="learn-details" open><summary>📖 先学再练：${esc(calcName(t.calcTag))} 怎么算 · 例题 · 易错点</summary>${calcGuideHTML(t.calcTag,t)}</details>
       <div class="btn-row">
@@ -1089,7 +1106,16 @@ function submitPaper(){
     }
   });
   PAPER.submitted=true; PAPER.correct=correct; PAPER.rate=Math.round(correct/PAPER.items.length*100); PAPER.wrongN=wrongN;
-  S.calcSessions.push({id:uid(),taskId:PAPER_TASK.id,at:PAPER.date||activeDate(),tag:PAPER.tag,total:PAPER.items.length,correct:correct,rate:PAPER.rate});
+  /* 逐知识点留痕：保温题也要记，下次才能算「这个知识点多久没练、上次正确率多少」 */
+  const byTag={};
+  PAPER.items.forEach(q=>{
+    const k=calcTagKey(q.tag)||'mixed';
+    if(!byTag[k]) byTag[k]={tag:k,total:0,correct:0,review:!!q.review};
+    byTag[k].total++; if(q.ok) byTag[k].correct++;
+  });
+  const tags=Object.keys(byTag).map(k=>Object.assign(byTag[k],
+    {rate:Math.round(byTag[k].correct/Math.max(1,byTag[k].total)*100)}));
+  S.calcSessions.push({id:uid(),taskId:PAPER_TASK.id,at:PAPER.date||activeDate(),tag:PAPER.tag,tags:tags,total:PAPER.items.length,correct:correct,rate:PAPER.rate});
   save(); renderPaper(); renderCalcHistory(PAPER_TASK.id); renderAll();
   toast(PAPER.rate>=S.settings.calcThreshold?'✓ 计算达标':'继续练，达标后才能标记完成');
 }
@@ -2006,28 +2032,67 @@ function weekFocus(t,subIdx){
   return base;
 }
 
-/* ---- 每日计算：本任务新学/保温 + 掺入薄弱点保温 ---- */
+/* ---- 每日计算：本任务新学/保温 + 按遗忘风险掺入旧知识点 ----
+   旧数据里错题的 tag 记的是中文名（如「小数加减」），出题器用的是内部键（decadd）；
+   calcTagKey 做双向归一，避免「错题优先」实际退化成综合题。 */
 function shuffle(a){ a=a.slice(); for(let i=a.length-1;i>0;i--){ const j=R(0,i); const x=a[i]; a[i]=a[j]; a[j]=x; } return a; }
+function calcTagKey(v){
+  if(!v) return '';
+  if(Object.prototype.hasOwnProperty.call(GEN,v)) return v;
+  const names=D.calcTagNames||{};
+  return Object.keys(names).find(k=>names[k]===v)||'';
+}
 function priorStageTags(t){
   const si=parseInt((t.stage||'S1').slice(1),10)||1;
   const set=[...new Set(TASKS.filter(x=>parseInt((x.stage||'S1').slice(1),10)<si).map(x=>x.calcTag))].filter(x=>x!=='mixed'&&x!=='decmix');
   return set.length?set:['decadd'];
 }
+/* 遗忘风险：距上次练的天数 + 当时正确率 + 在册错题数；越久没练、错得越多越先出现 */
+function calcForgetRisk(k){
+  const name=D.calcTagNames[k]||k;
+  const sess=(S.calcSessions||[]).slice().sort((a,b)=>String(b.at).localeCompare(String(a.at)));
+  let last=null, lastRate=null;
+  for(const s of sess){
+    const hit=(s.tags||[]).find(x=>x.tag===k)||(s.tag===k?{rate:s.rate}:null);
+    if(hit){ last=s.at; lastRate=hit.rate; break; }
+  }
+  const wrongs=(S.mistakes||[]).filter(m=>m.type==='calc'&&m.status==='active'&&(m.tag===k||m.tag===name)).length;
+  const days=last?Math.max(0,dayDiff(last,activeDate())):45;
+  const rate=(typeof lastRate==='number')?lastRate:70;
+  return days + (100-rate)*0.4 + wrongs*15 + (last?0:10);
+}
+function reviewPool(t){
+  const weak=(S.mistakes||[]).filter(m=>m.type==='calc'&&m.status==='active')
+    .map(m=>calcTagKey(m.tag)).filter(Boolean);
+  const all=[...new Set(priorStageTags(t).concat(weak))]
+    .filter(k=>k!=='mixed'&&k!=='decmix'&&GEN[k]);
+  const seed=parseInt(String(activeDate()).replace(/-/g,''),10)||0;
+  return all.map((k,i)=>({k:k,s:calcForgetRisk(k)+((seed+i*3)%5)*0.6}))
+    .sort((a,b)=>b.s-a.s||a.k.localeCompare(b.k)).map(x=>x.k);
+}
 function makeDailyCalc(t){
   const oral=clamp(S.settings.oralCount,0,60), wri=clamp(S.settings.writtenCount,0,60);
   const items=makePaper(t, Math.max(0,oral-2), Math.max(0,wri-1)).items;
-  const weak=[...new Set((S.mistakes||[]).filter(m=>m.type==='calc'&&m.status==='active').map(m=>m.tag))];
-  const pool=weak.length?weak:priorStageTags(t);
-  shuffle(pool).slice(0,2).forEach(tg=>{ const fn=GEN[tg]||GEN.mixed;
+  const picks=reviewPool(t).slice(0,2);
+  picks.forEach(tg=>{ const fn=GEN[tg]||GEN.mixed;
     items.push(Object.assign({kind:'口算',tag:tg,key:uid(),review:true},fn('oral')));
     items.push(Object.assign({kind:'笔算',tag:tg,key:uid(),review:true},fn('written'))); });
-  return {tag:effectiveTag(t), items:items, at:new Date().toISOString(), isDaily:true};
+  return {tag:effectiveTag(t), items:items, at:new Date().toISOString(), isDaily:true, reviewTags:picks};
 }
 
 /* ---- 达标测试：计算(自动判分) + 应用题(优先错题库举一反三，家长判分) ---- */
 function buildMasteryTest(t){
-  const cp=makePaper(t, 4, 2);
+  /* 6 道计算 = 4 道本任务 + 2 道跨阶段旧知识回测；总题量不变，≥80% 放行线不变 */
+  const cp=makePaper(t, 3, 1);
   const calcItems=cp.items.map(q=>({kind:'calc',tag:q.tag,stem:q.stem,ans:q.ans,graded:'auto',given:'',ok:null}));
+  const extras=reviewPool(t).slice(0,2).map(k=>({k:k,old:true}));
+  /* S1 还没学过别的知识点时池子不足 2 个，用本任务知识点补足，保证 6 道计算 / 10 题不变 */
+  const mainTag=effectiveTag(t);
+  while(extras.length<2) extras.push({k:mainTag,old:false});
+  extras.forEach(x=>{
+    const fn=GEN[x.k]||GEN.mixed, q=fn('written');
+    calcItems.push({kind:'calc',tag:x.k,stem:q.stem,ans:q.ans,graded:'auto',given:'',ok:null,review:x.old});
+  });
   const tag=t.topicTag, wordItems=[];
   (S.mistakes||[]).filter(m=>m.status==='active'&&topicTagOf(m)===tag).slice(0,2)
     .forEach(m=>wordItems.push({kind:'word',cat:tag,src:'错题',stem:m.question,imgKey:m.imageKey,fileKey:m.fileKey||'',fileName:m.fileName||'',fileType:m.fileType||'',ans:m.correctAnswer,childAns:m.childAnswer,graded:'manual',verdict:null,reason:m.reason||''}));
@@ -2041,10 +2106,11 @@ function openMasteryTest(id){ const t=TASKMAP[id]; if(!t) return; MT=buildMaster
 function renderMastery(){
   const box=$('#mtBox'); if(!box||!MT) return;
   const calcN=MT.items.filter(i=>i.kind==='calc').length, wordN=MT.items.length-calcN;
+  const oldN=MT.items.filter(i=>i.kind==='calc'&&i.review).length;
   if(!MT.submitted){
-    box.innerHTML=`<div class="card"><p class="hint">共 ${MT.items.length} 题：计算 <b>${calcN}</b> 题（填答案自动判分）+ 应用题 <b>${wordN}</b> 题（写完请家长点「对/错」）。提交后看是否 ≥80% 过关。</p>
+    box.innerHTML=`<div class="card"><p class="hint">共 ${MT.items.length} 题：计算 <b>${calcN}</b> 题${oldN?`（含 ${oldN} 道旧知识回测，填答案自动判分）`:'（填答案自动判分）'}+ 应用题 <b>${wordN}</b> 题（写完请家长点「对/错」）。提交后看是否 ≥80% 过关。</p>
       ${MT.items.map((it,i)=>it.kind==='calc'
-        ? `<div class="q-item" id="mtq-${i}"><span class="qn">${i+1}</span><span class="qs">${esc(it.stem)}</span><input type="text" inputmode="decimal" data-mi="${i}" placeholder="答案"><span class="mark"></span></div>`
+        ? `<div class="q-item" id="mtq-${i}"><span class="qn">${i+1}</span><span class="qs">${esc(it.stem)}</span>${it.review?'<span class="q-tag">↺ 旧知识</span>':''}<input type="text" inputmode="decimal" data-mi="${i}" placeholder="答案"><span class="mark"></span></div>`
         : `<div class="q-item word" id="mtq-${i}"><span class="qn">${i+1}</span><div class="qw-body">
              <div class="qs">${it.imgKey?`<img class="thumb" data-img-key="${esc(it.imgKey)}">`:''}${esc(it.stem)}</div>
              ${attachHTML(it)}
@@ -2147,6 +2213,18 @@ document.addEventListener('click',e=>{
     case 'pick-day': setActiveDate(el.dataset.v); break;
     case 'day-shift': setActiveDate(addDays(activeDate(),parseInt(el.dataset.v,10)||0)); break;
     case 'day-today': setActiveDate(TODAY()); break;
+    /* 任务页 / 规划页的快捷入口：直接跳到首页并切到那一天 */
+    case 'go-day': {
+      const v=el.dataset.v||'today'; let d=TODAY();
+      if(v==='-1') d=addDays(TODAY(),-1);
+      else if(v==='mon') d=addDays(weekDaysOf(TODAY())[0],1);
+      setActiveDate(d);
+      if(activePage()!=='home'){ NAV.page=['home']; applyPage('home'); }
+      const box=$('#currentTask');
+      if(box&&box.scrollIntoView) box.scrollIntoView({behavior:'smooth',block:'start'});
+      if(v==='pick') setTimeout(()=>{ const p=$('#dayPick'); if(p){ p.focus(); try{ if(p.showPicker) p.showPicker(); }catch(err){} } },280);
+      break;
+    }
     case 'go-home': goPage('home'); break;
     case 'go-overview': goPage('overview'); break;
     case 'go-settings': goPage('settings'); break;
@@ -2227,6 +2305,7 @@ document.addEventListener('click',e=>{
     case 'redo-verdict': redoVerdict(id,el.dataset.v==='ok'); break;
     case 'next-redo': nextRedo(); break;
     case 'calc-guide': openCalcGuide(id); break;
+    case 'calc-practice': practiceCalcTag(id); break;
     case 'jump-first-wrong': {
       const w=document.querySelector('.q-wrong');
       if(w&&w.scrollIntoView) w.scrollIntoView({behavior:'smooth',block:'center'});
@@ -2241,7 +2320,7 @@ document.addEventListener('click',e=>{
       if(S.completed[id]){ if(confirm('取消该任务的完成标记？')){ delete S.completed[id]; S.currentId=id; save(); renderAll(); } }
       else completeTask(id);
       break; }
-    case 'gen-paper': genPaper(null); break;
+    case 'gen-paper': genPaper((PAPER&&PAPER.fixedTag)||null); break;
     case 'regen-paper': genPaper(PAPER?PAPER.tag:null); break;
     case 'submit-paper': submitPaper(); break;
     case 'word-photo': $('#wordFile').click(); break;
