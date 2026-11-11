@@ -41,7 +41,7 @@ const DEF_SETTINGS = { oralCount:15, writtenCount:10, calcThreshold:90, wordThre
                        requireWord:true, allowSkip:false, notify:false,
                        aiEnabled:false, aiEndpoint:'', aiModel:'', aiKey:'' };
 function blank(){ return { settings:Object.assign({},DEF_SETTINGS), completed:{}, currentId:null,
-                           calcSessions:[], wordItems:[], mistakes:[], library:[], progress:{} }; }
+                           calcSessions:[], wordItems:[], mistakes:[], library:[], progress:{}, masteryLog:[] }; }
 function load(){
   try{
     const raw=localStorage.getItem(KEY);
@@ -50,7 +50,7 @@ function load(){
     const b=blank();
     s.settings=Object.assign({},b.settings,s.settings||{});
     ['completed','progress'].forEach(k=>{ if(!s[k]||typeof s[k]!=='object') s[k]=b[k]; });
-    ['calcSessions','wordItems','mistakes','library'].forEach(k=>{ if(!Array.isArray(s[k])) s[k]=[]; });
+    ['calcSessions','wordItems','mistakes','library','masteryLog'].forEach(k=>{ if(!Array.isArray(s[k])) s[k]=[]; });
     return s;
   }catch(e){ return blank(); }
 }
@@ -104,7 +104,7 @@ function safeParse(s){ try{ return JSON.parse(s); }catch(e){ return null; } }
 function boot(){
   var local=localStorage.getItem(KEY);
   var localUpdatedAt=syncMeta().updatedAt||0;
-  if(local){ try{ S=JSON.parse(local); }catch(e){} }
+  if(local){ try{ S=load(); }catch(e){} }   /* 走 load() 补齐老版本数据里没有的字段 */
   renderAll();
   if(!window.SYNC || !SYNC.getToken()){ updateSyncChip('未配置同步'); return Promise.resolve(); }
   return SYNC.reconcile(localUpdatedAt, function(d){ S=d; try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} })
@@ -354,7 +354,7 @@ function topicTagOf(m){
 }
 function mkReviews(d){ return [1,3,7].map(day=>({day:day,due:addDays(d,day),done:null,ok:null})); }
 function addMistake(o){
-  const d=TODAY();
+  const d=o.date||TODAY();   /* 补录：按家长选的那天记错题，1/3/7 天也从那天算 */
   const m={ id:uid(), date:d, taskId:o.taskId||'', stage:o.stage||'', tag:o.tag||'综合',
     topicTag:topicTagOf({tag:o.tag,topicTag:o.topicTag}), source:o.source||'', type:o.type||'calc',
     question:o.question||'', imageKey:o.imageKey||'', fileKey:o.fileKey||'', fileName:o.fileName||'', fileType:o.fileType||'',
@@ -564,57 +564,137 @@ function renderHome(){
   $('#wrongBadge').textContent=due;
   $('#quickOverview').textContent=`8 个阶段 · ${total} 个任务`;
   $('#quickWrong').textContent=`${activeMistakes().length} 题 · 可浏览 / 重做`;
-  $('#currentTask').innerHTML=cur ? dailyPanelHTML(cur) : '<div class="card"><h3>🎉 82 个任务全部完成</h3><p class="hint">可到「任务」页回看，或在「设置」里导出备份。</p></div>';
+  /* 统计栏始终显示「当前任务」；下面这张卡按家长选中的日期显示那天安排的任务 */
+  const view=taskForDate(activeDate())||cur;
+  $('#currentTask').innerHTML=view ? dailyPanelHTML(view) : '<div class="card"><h3>🎉 82 个任务全部完成</h3><p class="hint">可到「任务」页回看，或在「设置」里导出备份。</p></div>';
 }
 /* ---------------- 今日学习面板（首页核心） ---------------- */
 function prog(id){ if(!S.progress) S.progress={}; return S.progress[id]||(S.progress[id]={start:null,end:null,daily:[],passed:false}); }
 function dayDiff(a,b){ return Math.round((new Date(b+'T00:00:00')-new Date(a+'T00:00:00'))/86400000); }
-function logToday(id,patch){
-  const p=prog(id), today=TODAY();
-  let rec=p.daily.find(d=>d.date===today);
-  if(!rec){ rec={date:today,calc:false,calcN:0,topicFocus:'',word:false,note:''}; p.daily.push(rec); }
+function logToday(id,patch,date){
+  const p=prog(id), d=date||TODAY();
+  let rec=p.daily.find(x=>x.date===d);
+  if(!rec){ rec={date:d,calc:false,calcN:0,topicFocus:'',word:false,note:''}; p.daily.push(rec); }
   Object.assign(rec,patch);
-  if(!p.start) p.start=today;
+  if(!p.start||d<p.start) p.start=d;
   save(); renderAll();
 }
-function todayRec(id){ const p=prog(id); return (p.daily||[]).find(d=>d.date===TODAY())||null; }
+function dayRec(id,d){ const p=prog(id); return (p.daily||[]).find(x=>x.date===d)||null; }
+function todayRec(id){ return dayRec(id,TODAY()); }
+
+/* ---------------- 按日期回看 / 补录 ----------------
+   家长可以点周节奏条上的任意一天、翻上一周下一周、或直接选日期：
+   面板显示那天的任务与完成情况；当天做的计算 / 应用题 / 随手录题都记到那一天。
+   ACTIVE_DATE 只是界面状态，不写进存储，也不参与跨设备同步。 */
+let ACTIVE_DATE=TODAY();
+function activeDate(){ return ACTIVE_DATE||TODAY(); }
+function isActiveToday(){ return activeDate()===TODAY(); }
+function setActiveDate(d){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d||'')) return;
+  ACTIVE_DATE=d; renderHome();
+}
+function dowOf(d){ return new Date(d+'T00:00:00').getDay(); }
+function dateLabel(d){ return `${cnDate(d)} · 周${['日','一','二','三','四','五','六'][dowOf(d)]}`; }
+/* 周日为一周的第一天，和节奏条顺序一致 */
+function weekDaysOf(d){ const sun=addDays(d,-dowOf(d)); return Array.from({length:7},(_,i)=>addDays(sun,i)); }
+/* 这一天按周计划排了哪些任务（轻量/复盘任务没有具体周，自动跟随相邻周） */
+function tasksForDate(d){
+  const out=[];
+  STAGES.forEach(st=>{
+    const wp=weekPlan(st);
+    TASKS.filter(t=>t.stage===st).forEach(t=>{
+      const w=wp[t.id];
+      if(w&&w.start&&w.end&&d>=w.start&&d<=w.end) out.push(t);
+    });
+  });
+  return out;
+}
+function taskForDate(d){
+  const cur=currentTask(), list=tasksForDate(d);
+  if(!list.length) return cur;                       /* 开学前 / 假期空档：跟着当前任务补录 */
+  if(cur&&list.some(t=>t.id===cur.id)) return cur;
+  return list.find(t=>!S.completed[t.id])||list[0]||cur;
+}
+/* 这一天有没有留下过记录：节奏条上打一个小圆点 */
+function dayHasLog(d){
+  if((S.calcSessions||[]).some(x=>x.at===d)||(S.wordItems||[]).some(x=>x.at===d)||
+     (S.mistakes||[]).some(x=>x.date===d)||(S.library||[]).some(x=>x.at===d)||
+     (S.masteryLog||[]).some(x=>x.at===d)) return true;
+  return Object.keys(S.progress||{}).some(id=>
+    (((S.progress[id]||{}).daily)||[]).some(r=>r.date===d&&(r.calc||r.word||r.topicFocus||r.note)));
+}
+const clip = (s,n) => { const x=String(s||''); return x.length>n?x.slice(0,n)+'…':x; };
+/* 某天完成情况明细：计算、应用题、随手录、附件、错题、达标测试 */
+function dayDetailHTML(d,t){
+  const sess=(S.calcSessions||[]).filter(x=>x.at===d);
+  const words=(S.wordItems||[]).filter(x=>x.at===d);
+  const wrongs=(S.mistakes||[]).filter(x=>x.date===d);
+  const libs=(S.library||[]).filter(x=>x.at===d);
+  const tests=(S.masteryLog||[]).filter(x=>x.at===d);
+  const rec=dayRec(t.id,d);
+  const rows=[];
+  if(rec&&(rec.calc||rec.word||rec.topicFocus||rec.note)) rows.push(
+    `<div class="dd-row"><span>📌 当日记录</span><div>${rec.calc?'✅ 已做计算':'⭕ 未记计算'} ｜ ${rec.word?'✅ 已做应用题':'⭕ 未记应用题'}${rec.topicFocus?'<br>小目标：'+esc(rec.topicFocus):''}${rec.note?'<br>备注：'+esc(rec.note):''}</div></div>`);
+  if(sess.length) rows.push(`<div class="dd-row"><span>🧮 计算</span><div>${sess.map(x=>`${esc(D.calcTagNames[x.tag]||x.tag)} · ${x.total} 题 · 正确率 <b>${x.rate}%</b>`).join('<br>')}</div></div>`);
+  if(words.length) rows.push(`<div class="dd-row"><span>📖 应用题</span><div>共 ${words.length} 题（对 ${words.filter(x=>x.verdict==='correct').length} / 错 ${words.filter(x=>x.verdict==='wrong').length}）<br>${words.slice(0,4).map(x=>esc(clip(x.text||'（见图片）',34))).join('<br>')}${words.length>4?'<br>…':''}</div></div>`);
+  if(tests.length) rows.push(`<div class="dd-row"><span>📝 达标测试</span><div>${tests.map(x=>`${esc(x.taskId)} · ${x.rate}% · ${x.passed?'✅ 通过':'❌ 未通过'}`).join('<br>')}</div></div>`);
+  if(libs.length) rows.push(`<div class="dd-row"><span>📥 录入题目</span><div>${libs.length} 题 / 附件<br>${libs.slice(0,4).map(x=>esc(clip(x.kind==='file'?x.fileName:x.text||'',34))).join('<br>')}${libs.length>4?'<br>…':''}</div></div>`);
+  if(wrongs.length) rows.push(`<div class="dd-row"><span>✎ 当天错题</span><div>${wrongs.length} 道${wrongs.slice(0,3).map(m=>`<br>${esc(clip(m.question||'（见图片）',28))} <button class="linkbtn" data-action="view-wrong" data-id="${esc(m.id)}">查看 ›</button>`).join('')}${wrongs.length>3?'<br>…':''}</div></div>`);
+  return `<div class="day-detail"><div class="dd-h">📋 ${esc(dateLabel(d))} 的完成情况<small>${rows.length?'点错题右侧「查看」可看原题与错因':'这天还没有记录，可用上面的按钮补录'}</small></div>
+    ${rows.length?rows.join(''):'<p class="hint">这天还没有记录。选中日期后点「补录…」，题目和完成情况都会记到这一天。</p>'}</div>`;
+}
 function dailyPanelHTML(t){
-  const wp=taskWeek(t.id), rec=todayRec(t.id), p=prog(t.id);
+  const d0=activeDate(), isT=isActiveToday(), wp=taskWeek(t.id), rec=dayRec(t.id,d0), p=prog(t.id);
   const passed=p.passed;
-  const calcToday=rec&&rec.calc;
-  const todaySess=S.calcSessions.filter(x=>x.taskId===t.id&&x.at===TODAY());
-  const todayRate=todaySess.length?todaySess[todaySess.length-1].rate:null;
-  const dow=(new Date()).getDay();
-  const sess=weeklySession(dow);
+  const calcDone=rec&&rec.calc;
+  const daySess=S.calcSessions.filter(x=>x.taskId===t.id&&x.at===d0);
+  const dayRate=daySess.length?daySess[daySess.length-1].rate:null;
+  const dow=dowOf(d0), sess=weeklySession(dow);
   const dayNames=['日','一','二','三','四','五','六'];
-  const rhythm=WEEK_STUDY_DAYS.map(d=>({d,type:'study'})).concat(WEEK_FLEX_DAYS.map(d=>({d,type:'flex'}))).concat(WEEK_REVIEW_DAYS.map(d=>({d,type:'review'})))
-    .sort((a,b)=>a.d-b.d)
-    .map(o=>`<div class="rhythm-day ${o.type} ${o.d===dow?'today':''}"><b>周${dayNames[o.d]}</b><span>${o.type==='study'?'学新':(o.type==='review'?'复习/错题':'弹性')}</span></div>`).join('');
+  const week=weekDaysOf(d0);
+  const rhythm=week.map(ds=>{
+    const dd=dowOf(ds), ty=weeklySession(dd).type;
+    const cls=[ty,ds===TODAY()?'today':'',ds===d0?'sel':'',dayHasLog(ds)?'has-log':''].filter(Boolean).join(' ');
+    return `<button type="button" class="rhythm-day ${cls}" data-action="pick-day" data-v="${ds}" title="查看 ${ds} 的任务"><b>周${dayNames[dd]}</b><small>${ds.slice(5).replace('-','/')}</small><span>${ty==='study'?'学新':(ty==='review'?'复习/错题':'弹性')}</span></button>`;
+  }).join('');
   const weekText = wp ? `第 ${wp.week} 周${wp.dense?' · 假期密集周':(wp.light?' · 复盘周':(wp.hard&&!wp.compress?' · 难项(2周)':''))}` : '';
   const weekRange = wp&&wp.start ? `${cnDate(wp.start)}–${cnDate(wp.end)}` : '';
-  const subIdx = (wp&&wp.hard&&!wp.compress&&wp.start) ? Math.min(2,Math.max(1,Math.floor(dayDiff(wp.start,TODAY())/7)+1)) : 1;
-  return `<div class="stage-head">本周任务<small>每周约 ${WEEKLY_HOURS} 小时 · 达标才顺延</small></div>
+  const subIdx = (wp&&wp.hard&&!wp.compress&&wp.start) ? Math.min(2,Math.max(1,Math.floor(dayDiff(wp.start,d0)/7)+1)) : 1;
+  const thisDay = isT?'今天':'这天';
+  return `<div class="stage-head">任务 · 按日期查看<small>每周约 ${WEEKLY_HOURS} 小时 · 点任意一天回看 / 补录</small></div>
+  <div class="day-nav">
+    <button type="button" class="dn-arrow" data-action="day-shift" data-v="-1" aria-label="前一天">‹</button>
+    <label class="dn-pick"><span>${isT?'今天':(d0<TODAY()?'回看':'预览')}</span><input type="date" id="dayPick" value="${d0}"></label>
+    <button type="button" class="dn-arrow" data-action="day-shift" data-v="1" aria-label="后一天">›</button>
+    ${isT?'':`<button type="button" class="dn-today" data-action="day-today">回到今天</button>`}
+  </div>
+  <div class="day-week"><button type="button" class="wk-btn" data-action="day-shift" data-v="-7">‹ 上一周</button>
+    <span>${week[0].slice(5).replace('-','/')} – ${week[6].slice(5).replace('-','/')}</span>
+    <button type="button" class="wk-btn" data-action="day-shift" data-v="7">下一周 ›</button></div>
+  ${isT?'':`<div class="day-back-note">⏪ 正在${d0<TODAY()?'回看 / 补录':'预览'} <b>${esc(dateLabel(d0))}</b>：这天录入的计算、应用题、随手录题、附件都会记到这一天。${d0>TODAY()?'未来日期建议只用来看安排。':''}
+    <div class="btn-row"><button class="btn small ghost" data-action="open-inbox">📥 补录这天的随手录题</button><button class="btn small ghost" data-action="open-attach">📎 补录整份附件</button></div></div>`}
   <div class="daily-card">
-    <div class="dc-task">当前任务 <b>${esc(t.id)}</b> · ${esc(t.stage)} ${esc(t.stageName)} <span class="pill ${passed?'done':''}">${passed?'已通过达标测试':'进行中'}</span></div>
+    <div class="dc-task">${isT?'当前任务':'这天安排的任务'} <b>${esc(t.id)}</b> · ${esc(t.stage)} ${esc(t.stageName)} <span class="pill ${passed?'done':''}">${passed?'已通过达标测试':'进行中'}</span></div>
     ${weekText?`<div class="dc-win">📅 ${esc(weekText)}${weekRange?(' · '+esc(weekRange)):''}</div>`:''}
     ${wp&&wp.dense?`<div class="dense-note">⚠ 假期密集周：本周与同阶段其他任务并行，无课可多学——每天带一点计算和巩固题即可，不必一天啃完。</div>`:''}
+    <div class="rhythm-legend">点日期回看 / 补录 ｜ 深绿 = 正在看 · 绿框 = 今天 · • = 有记录</div>
     <div class="rhythm-strip">${rhythm}</div>
-    <div class="dc-session ${sess.type}">今天（周${dayNames[dow]}）：${esc(sess.label)}</div>
+    <div class="dc-session ${sess.type}">${isT?'今天':esc(cnDate(d0))}（周${dayNames[dow]}）：${esc(sess.label)}</div>
     <div class="dc-grid">
       <div class="dc-block calc">
         <div class="dc-h">① 计算 <span class="dc-tag">每天必做</span></div>
         <p class="dc-sub">本任务：${esc(calcName(t.calcTag))} ${calcIsNew(t)?'· 新学':'· 保温'} ｜ 建议 ${esc(t.calcCount)}</p>
-        <p class="dc-sub">今日：${calcToday?'✅ 已做':(todayRate!==null?'✅ 已做 · 正确率'+todayRate+'%':'⭕ 还没做')}</p>
-        <div class="btn-row"><button class="btn" data-action="daily-calc" data-id="${esc(t.id)}">做今日计算</button></div>
+        <p class="dc-sub">${thisDay}：${calcDone?'✅ 已做':(dayRate!==null?'✅ 已做 · 正确率'+dayRate+'%':'⭕ 还没做')}</p>
+        <div class="btn-row"><button class="btn" data-action="daily-calc" data-id="${esc(t.id)}">${isT?'做今日计算':'✚ 补录这天的计算'}</button></div>
       </div>
       <div class="dc-block topic">
-        <div class="dc-h">② 专题 <span class="dc-tag">今天学哪一块</span></div>
+        <div class="dc-h">② 专题 <span class="dc-tag">${thisDay}学哪一块</span></div>
         <p class="dc-sub">${esc(t.topicTag)}：${esc(t.topic)}</p>
         <div class="dc-focus">📌 本周学：${esc(weekFocus(t,subIdx))}</div>
-        <label class="lbl">今日专题小目标（一个任务可分多天，每天选一块练）</label>
-        <input type="text" id="dailyFocus" value="${esc(rec?rec.topicFocus:'')}" placeholder="例：今天只练盈亏 / 盈盈+盈亏">
-        <label class="switch"><input type="checkbox" id="dailyWord" ${rec&&rec.word?'checked':''}> 今天做了应用题</label>
-        <div class="btn-row"><button class="btn amber" data-action="daily-word" data-id="${esc(t.id)}">做应用题</button></div>
+        <label class="lbl">${thisDay}专题小目标（一个任务可分多天，每天选一块练）</label>
+        <input type="text" id="dailyFocus" data-task="${esc(t.id)}" data-date="${d0}" value="${esc(rec?rec.topicFocus:'')}" placeholder="例：今天只练盈亏 / 盈盈+盈亏">
+        <label class="switch"><input type="checkbox" id="dailyWord" data-task="${esc(t.id)}" data-date="${d0}" ${rec&&rec.word?'checked':''}> ${thisDay}做了应用题</label>
+        <div class="btn-row"><button class="btn amber" data-action="daily-word" data-id="${esc(t.id)}">${isT?'做应用题':'✚ 补录这天的题'}</button></div>
       </div>
     </div>
     <div class="dc-block test">
@@ -624,8 +704,9 @@ function dailyPanelHTML(t){
         <button class="btn ghost" data-action="open-task" data-id="${esc(t.id)}">看完整任务卡 ›</button></div>
     </div>
     ${sess.type==='review'?`<div class="dc-foot">🗓 周末复习：把本周做错的题再练一遍 → <button class="linkbtn" data-action="week-review" data-id="${esc(t.id)}">看本周错题</button></div>`
-      :`<div class="dc-foot">📝 今日小结：${rec?esc((rec.calc?'已做计算':'未做计算')+' ｜ '+(rec.word?'已做应用':'未做应用')+(rec.topicFocus?' ｜ 专题：'+rec.topicFocus:'')):'今天还没记录，做完上面任意一项会自动记一笔'}</div>`}
-  </div>`;
+      :`<div class="dc-foot">📝 ${isT?'今日小结':esc(cnDate(d0))+' 小结'}：${rec?esc((rec.calc?'已做计算':'未做计算')+' ｜ '+(rec.word?'已做应用':'未做应用')+(rec.topicFocus?' ｜ 专题：'+rec.topicFocus:'')):'这天还没记录，做完上面任意一项会自动记一笔'}</div>`}
+  </div>
+  ${dayDetailHTML(d0,t)}`;
 }
 
 /* ---------------- 渲染：任务序列 ---------------- */
@@ -914,7 +995,7 @@ async function hydrateImages(root){
 }
 
 /* ---------------- 子页面 ---------------- */
-let PAPER=null, PAPER_TASK=null, WORD={taskId:null,imageKey:'',text:'',childAnswer:'',correctAnswer:''};
+let PAPER=null, PAPER_TASK=null, PAPER_DATE=null, WORD={taskId:null,date:null,imageKey:'',text:'',childAnswer:'',correctAnswer:''};
 let INBOX={imageKey:'',guess:null};
 let LIBFILTER={tag:'',kw:''};
 let VARSTATE={tag:'',mistakeId:'',items:[],mode:'local'};
@@ -931,11 +1012,13 @@ function uploadCtx(){
 /* 计算练习 */
 function openCalc(id,preset){
   const t=TASKMAP[id]||currentTask(); if(!t) return;
-  PAPER_TASK=t; PAPER=preset||null;
-  openSheet(`${t.id} · 计算练习`, `
+  PAPER_TASK=t; PAPER_DATE=activeDate(); PAPER=preset||null;
+  if(PAPER) PAPER.date=PAPER_DATE;
+  openSheet(`${t.id} · 计算练习${PAPER_DATE!==TODAY()?'（补录 '+cnDate(PAPER_DATE)+'）':''}`, `
     <div class="card">
       <h3>${esc(t.calcText)}</h3>
       <p class="hint">知识点：${esc(calcName(t.calcTag))} · ${calcIsNew(t)?'新学（建议先看下面讲解再做题）':'保温复习'} ｜ ${esc(t.calcCount)}${(t.calcTag==='mixed'||t.calcTag==='decmix')?' ｜ 保温题会从本阶段已学知识点里随机抽':''}</p>
+      ${PAPER_DATE!==TODAY()?`<p class="hint">⏪ 补录模式：这套练习和产生的错题都会记到 <b>${esc(cnDate(PAPER_DATE))}</b>。</p>`:''}
       <details class="learn-details" open><summary>📖 先学再练：${esc(calcName(t.calcTag))} 怎么算 · 例题 · 易错点</summary>${calcGuideHTML(t.calcTag,t)}</details>
       <div class="btn-row">
         <label class="field" style="flex:1;min-width:130px"><span>口算</span><input type="number" id="paperOral" min="0" max="60" value="${S.settings.oralCount}"></label>
@@ -987,7 +1070,7 @@ function renderCalcHistory(taskId){
 function genPaper(fixedTag){
   const o=clamp(parseInt($('#paperOral').value,10)||0,0,60), w=clamp(parseInt($('#paperWritten').value,10)||0,0,60);
   if(o+w===0){ toast('至少生成 1 道题'); return; }
-  PAPER=makePaper(PAPER_TASK,o,w,fixedTag); PAPER.submitted=false;
+  PAPER=makePaper(PAPER_TASK,o,w,fixedTag); PAPER.submitted=false; PAPER.date=PAPER_DATE||activeDate();
   renderPaper(); $('#paperBox').scrollIntoView({behavior:'smooth',block:'start'});
 }
 function submitPaper(){
@@ -1000,12 +1083,13 @@ function submitPaper(){
     if(q.ok) correct++; else{
       wrongN++;
       const m=addMistake({taskId:PAPER_TASK.id,stage:PAPER_TASK.stage,tag:D.calcTagNames[q.tag]||q.tag,type:'calc',
+        date:PAPER.date||activeDate(),
         question:q.stem+' （'+q.kind+'）',childAnswer:q.given||'（未填）',correctAnswer:q.ans,reason:'计算失误'});
       q.mistakeId=m.id;
     }
   });
   PAPER.submitted=true; PAPER.correct=correct; PAPER.rate=Math.round(correct/PAPER.items.length*100); PAPER.wrongN=wrongN;
-  S.calcSessions.push({id:uid(),taskId:PAPER_TASK.id,at:TODAY(),tag:PAPER.tag,total:PAPER.items.length,correct:correct,rate:PAPER.rate});
+  S.calcSessions.push({id:uid(),taskId:PAPER_TASK.id,at:PAPER.date||activeDate(),tag:PAPER.tag,total:PAPER.items.length,correct:correct,rate:PAPER.rate});
   save(); renderPaper(); renderCalcHistory(PAPER_TASK.id); renderAll();
   toast(PAPER.rate>=S.settings.calcThreshold?'✓ 计算达标':'继续练，达标后才能标记完成');
 }
@@ -1013,9 +1097,10 @@ function submitPaper(){
 /* 应用题 */
 function openWord(id){
   const t=TASKMAP[id]||currentTask(); if(!t) return;
-  WORD={taskId:t.id,imageKey:'',text:'',childAnswer:'',correctAnswer:''};
-  openSheet(`${t.id} · 应用题`, `
+  WORD={taskId:t.id,date:activeDate(),imageKey:'',text:'',childAnswer:'',correctAnswer:''};
+  openSheet(`${t.id} · 应用题${WORD.date!==TODAY()?'（补录 '+cnDate(WORD.date)+'）':''}`, `
     <div class="card"><h3>本任务专题：${esc(t.topicTag)}</h3>
+      ${WORD.date!==TODAY()?`<p class="hint">⏪ 补录模式：下面录入的题和错题都会记到 <b>${esc(cnDate(WORD.date))}</b>。</p>`:''}
       <div class="info-row"><div class="v">${esc(t.topic)}</div></div>
       ${guideHTML(t.topicTag)}
       <div class="btn-row"><button class="btn ghost" data-action="open-inbox">📥 随手录题（不绑定本任务，自动归专题）</button></div>
@@ -1084,13 +1169,14 @@ function saveWord(verdict){
   const t=TASKMAP[WORD.taskId]; if(!t) return;
   const text=$('#wordText').value.trim(), child=$('#wordChild').value.trim(), correct=$('#wordCorrect').value.trim();
   if(!text&&!WORD.imageKey){ toast('请先填题目文字或上传图片'); return; }
+  const at=WORD.date||activeDate();
   let newM=null;
-  if(verdict==='wrong') newM=addMistake({taskId:t.id,stage:t.stage,tag:t.topicTag,type:'word',
+  if(verdict==='wrong') newM=addMistake({taskId:t.id,stage:t.stage,tag:t.topicTag,type:'word',date:at,
     question:text,imageKey:WORD.imageKey,childAnswer:child,correctAnswer:correct,reason:'思路错误'});
-  S.wordItems.push({id:uid(),taskId:t.id,at:TODAY(),text:text,imageKey:WORD.imageKey,
+  S.wordItems.push({id:uid(),taskId:t.id,at:at,text:text,imageKey:WORD.imageKey,
     childAnswer:child,correctAnswer:correct,verdict:verdict,mistakeId:newM?newM.id:''});
   save();
-  WORD={taskId:t.id,imageKey:'',text:'',childAnswer:'',correctAnswer:''};
+  WORD={taskId:t.id,date:at,imageKey:'',text:'',childAnswer:'',correctAnswer:''};
   $('#wordText').value=''; $('#wordChild').value=''; $('#wordCorrect').value=''; $('#wordImg').innerHTML=''; $('#wordFile').value='';
   const rb=$('#wordReason');
   if(rb){
@@ -1112,7 +1198,9 @@ function openInbox(){
   openSheet('随手录题 · 自动归专题', `
     <div class="card">
       <h3>录一道题，不用管它是哪类</h3>
-      <p class="hint">日常做过的、看到的好题都能随手录。工作台按题目里的特征词判断该归到哪个专题，判错了在下面改一下就行。<b>不绑定今天的任务，也不会影响任务达标。</b></p>
+      <p class="hint">日常做过的、看到的好题都能随手录。工作台按题目里的特征词判断该归到哪个专题，判错了在下面改一下就行。<b>不绑定今天的任务，也不会影响任务达标。</b>补录昨天做过的题，把下面日期改成昨天即可。</p>
+      <label class="lbl">做题 / 录入日期（补录旧题时改这里）</label>
+      <input type="date" id="inboxDate" value="${activeDate()}">
       <div class="btn-row">
         <button class="btn ghost" data-action="inbox-photo">📷 拍照 / 选图</button>
         <button class="btn ghost" data-action="word-ocr">文字识别（需联网）</button>
@@ -1163,15 +1251,16 @@ function saveInbox(){
   const text=$('#inboxText')?$('#inboxText').value.trim():'';
   if(!text&&!INBOX.imageKey){ toast('请先填题目文字或上传图片'); return; }
   const tag=$('#inboxTag')?$('#inboxTag').value:'综合';
+  const at=$('#inboxDate')?($('#inboxDate').value||activeDate()):activeDate();
   const g=INBOX.guess||{};
-  const item={ id:uid(), at:TODAY(), tag:tag, text:text, imageKey:INBOX.imageKey,
+  const item={ id:uid(), at:at, tag:tag, text:text, imageKey:INBOX.imageKey,
     childAnswer:$('#inboxChild').value.trim(), correctAnswer:$('#inboxCorrect').value.trim(),
     note:$('#inboxNote').value.trim(), source:$('#inboxSource')?$('#inboxSource').value:'随手录入',
     auto:!!(text&&g.tag===tag&&!g.empty), confidence:g.confidence||'无' };
   S.library.push(item);
   if($('#inboxWrong')&&$('#inboxWrong').checked){
     const rs=$('#inboxReason');
-    addMistake({taskId:'',stage:'随手录入',tag:tag,topicTag:tag,type:'word',source:'随手录入',
+    addMistake({taskId:'',stage:'随手录入',tag:tag,topicTag:tag,type:'word',source:'随手录入',date:at,
       question:text,imageKey:INBOX.imageKey,childAnswer:item.childAnswer,correctAnswer:item.correctAnswer,
       reason:rs?rs.value:'思路错误',note:item.note});
   }
@@ -1196,8 +1285,8 @@ function openAttachSheet(){
       <div id="attachInfo" class="attach-info">还没选文件</div>
       <label class="lbl">归到哪个专题</label>
       <select id="attachTag"><option value="">— 请选择专题 —</option>${TOPIC_LIST().map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}</select>
-      <label class="lbl">上传日期</label>
-      <input type="date" id="attachDate" value="${TODAY()}">
+      <label class="lbl">上传 / 做题日期（补录旧卷子时改这里）</label>
+      <input type="date" id="attachDate" value="${activeDate()}">
       <label class="lbl">这份附件里有几道题（填 1 就整份当一题）</label>
       <input type="number" id="attachCount" min="1" max="30" value="1">
       <label class="lbl">备注（可不填）</label>
@@ -1995,12 +2084,15 @@ function submitMastery(){
       const el=document.querySelector(`[data-mi="${i}"]`);
       it.given=el?el.value.trim():''; it.ok=isRight(it.given,it.ans);
       if(!it.ok && !S.mistakes.some(m=>m.status==='active'&&m.question===it.stem&&m.type==='calc'))
-        addMistake({taskId:MT.taskId,stage:TASKMAP[MT.taskId].stage,tag:D.calcTagNames[it.tag]||it.tag,type:'calc',question:it.stem,childAnswer:it.given||'(未填)',correctAnswer:it.ans,reason:'计算失误'});
+        addMistake({taskId:MT.taskId,stage:TASKMAP[MT.taskId].stage,tag:D.calcTagNames[it.tag]||it.tag,type:'calc',date:activeDate(),question:it.stem,childAnswer:it.given||'(未填)',correctAnswer:it.ans,reason:'计算失误'});
     }
   });
   const total=MT.items.length, correct=MT.items.filter(it=>it.kind==='calc'?it.ok:it.verdict===true).length;
   MT.rate=Math.round(correct/total*100); MT.submitted=true; MT.passed=MT.rate>=80;
-  if(MT.passed){ prog(MT.taskId).passed=true; save(); }
+  if(!Array.isArray(S.masteryLog)) S.masteryLog=[];
+  S.masteryLog.push({id:uid(),at:activeDate(),taskId:MT.taskId,rate:MT.rate,passed:MT.passed});
+  if(MT.passed) prog(MT.taskId).passed=true;
+  save();
   renderMastery(); renderAll();
   toast(MT.passed?'✅ 通过！可标记完成进入下一任务':'未达 80%，看下面的诊断和薄弱点再测一次');
 }
@@ -2051,6 +2143,10 @@ document.addEventListener('click',e=>{
   const el=e.target.closest('[data-action]'); if(!el) return;
   const a=el.dataset.action, id=el.dataset.id;
   switch(a){
+    /* 日期回看 / 补录：切换只重画首页这张卡，不动数据 */
+    case 'pick-day': setActiveDate(el.dataset.v); break;
+    case 'day-shift': setActiveDate(addDays(activeDate(),parseInt(el.dataset.v,10)||0)); break;
+    case 'day-today': setActiveDate(TODAY()); break;
     case 'go-home': goPage('home'); break;
     case 'go-overview': goPage('overview'); break;
     case 'go-settings': goPage('settings'); break;
@@ -2166,16 +2262,17 @@ document.addEventListener('click',e=>{
     case 'reset': if(confirm('⚠ 将清空全部任务进度、练习记录和错题（含图片），且不可恢复。建议先导出备份。确定清空？'))
       { S=blank(); save(); IMG.clear(); renderAll(); toast('已清空'); } break;
     case 'go-plan': goPage('plan'); break;
-    case 'daily-calc': { const t=TASKMAP[id]; if(t){ openCalc(t.id, makeDailyCalc(t)); logToday(t.id,{calc:true}); } break; }
-    case 'daily-word': { const t=TASKMAP[id]; if(t){ openWord(t.id); logToday(t.id,{word:true}); } break; }
+    case 'daily-calc': { const t=TASKMAP[id]; if(t){ openCalc(t.id, makeDailyCalc(t)); logToday(t.id,{calc:true},activeDate()); } break; }
+    case 'daily-word': { const t=TASKMAP[id]; if(t){ openWord(t.id); logToday(t.id,{word:true},activeDate()); } break; }
     case 'open-mastery': openMasteryTest(id); break;
-    case 'week-review': { const cur=currentTask(); if(cur){ const wp=taskWeek(cur.id); const ds=wp&&wp.week?weekDates(wp.week,cur.stage):null; BROWSE.quick='custom'; BROWSE.from=ds?ds.mon:''; BROWSE.to=ds?ds.sun:''; openWrongBrowse(); } break; }
+    case 'week-review': { const w=weekDaysOf(activeDate()); BROWSE.quick='custom'; BROWSE.from=w[0]; BROWSE.to=w[6]; openWrongBrowse(); break; }
     case 'submit-mastery': submitMastery(); break;
     case 'mt-verdict': { const i=+el.dataset.i; if(MT&&MT.items[i]){ MT.items[i].verdict = el.dataset.v==='1'; renderMastery(); } break; }
   }
 });
 document.addEventListener('change',e=>{
   const t=e.target;
+  if(t.id==='dayPick'){ setActiveDate(t.value); return; }
   if(t.id==='restoreFile'&&t.files[0]){ restore(t.files[0]); t.value=''; return; }
   if((t.id==='wordFile'||t.id==='inboxFile')&&t.files[0]){ handlePhoto(t.files[0]); return; }
   if(t.id==='attachFile'&&t.files[0]){ attachFilePicked(t.files[0]); return; }
@@ -2218,8 +2315,10 @@ document.addEventListener('change',e=>{
     const p=prog(t.dataset.id), f=t.dataset.pa;
     p[f]=t.value||null; save(); renderPlan(); return;
   }
-  if(t.id==='dailyFocus'){ const cur=currentTask(); if(cur) logToday(cur.id,{topicFocus:t.value}); return; }
-  if(t.id==='dailyWord'){ const cur=currentTask(); if(cur) logToday(cur.id,{word:t.checked}); return; }
+  if(t.id==='dailyFocus'||t.id==='dailyWord'){
+    const id=t.dataset.task||(currentTask()||{}).id; if(!id) return;
+    const d=t.dataset.date||activeDate();
+    logToday(id, t.id==='dailyFocus'?{topicFocus:t.value}:{word:t.checked}, d); return; }
 });
 document.addEventListener('input',e=>{
   const t=e.target;

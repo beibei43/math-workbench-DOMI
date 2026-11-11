@@ -568,3 +568,45 @@ input[type=password]{width:100%;border:1px solid var(--line);border-radius:9px;p
   #page-library > .btn-row{display:grid;grid-template-columns:1fr;gap:8px}
   #page-library > .btn-row .btn{width:100%;margin:0}
 }
+
+/* ============ 按日期回看 / 补录（v13） ============ */
+.day-nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 2px 6px}
+.dn-arrow{flex:0 0 34px;height:36px;border:1px solid var(--line);background:var(--card);border-radius:9px;font-size:20px;line-height:1;color:var(--teal-deep)}
+.dn-arrow:active{background:var(--teal-bg)}
+.dn-pick{flex:1 1 170px;min-width:150px;display:flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--card);border-radius:9px;padding:3px 8px}
+.dn-pick span{font-size:11px;color:var(--muted);white-space:nowrap}
+.dn-pick input[type=date]{flex:1;min-width:110px;border:0;background:transparent;font-size:13px;padding:5px 0;color:var(--ink)}
+.dn-today{flex:0 0 auto;border:1px solid var(--teal);background:var(--teal-bg);color:var(--teal-deep);border-radius:9px;padding:6px 10px;font-size:12px;font-weight:600}
+.day-week{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 2px 8px;padding:4px 6px;background:var(--card);border:1px solid var(--line);border-radius:9px;font-size:11.5px;color:var(--faint)}
+.day-week span{white-space:nowrap}
+.wk-btn{flex:0 0 auto;border:0;background:var(--bg);color:var(--teal-deep);border-radius:7px;padding:4px 9px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.wk-btn:active{background:var(--teal-bg)}
+.rhythm-legend{font-size:10.5px;color:var(--faint);margin:2px 1px 0;line-height:1.4}
+.day-back-note{background:var(--amber-bg);color:var(--amber);border-radius:10px;padding:9px 11px;font-size:12px;line-height:1.55;margin:8px 2px}
+.day-back-note b{color:var(--ink)}
+.day-back-note .btn-row{margin:7px 0 0}
+.day-back-note .btn{background:var(--card);color:var(--teal-deep);border:1px solid var(--line)}
+#inboxDate,#attachDate{width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;background:var(--card);font-size:14px;margin:2px 0 8px}
+/* 周节奏条：每天都是一个可点按钮 */
+.rhythm-day{font:inherit;cursor:pointer;width:100%;padding:5px 2px 6px;transition:box-shadow .15s}
+.rhythm-day small{display:block;font-size:9px;color:var(--faint);line-height:1.2}
+.rhythm-day.sel{box-shadow:0 0 0 2px var(--teal-deep);border-color:var(--teal);background:var(--teal)}
+.rhythm-day.sel b,.rhythm-day.sel span,.rhythm-day.sel small{color:#fff}
+.rhythm-day.has-log b::after{content:' •';color:var(--teal);font-weight:700}
+.rhythm-day.sel.has-log b::after{color:#fff}
+.rhythm-day.today:not(.sel){box-shadow:0 0 0 2px var(--teal);border-color:var(--teal)}
+.rhythm-day:active{transform:scale(.97)}
+/* 某天完成情况明细 */
+.day-detail{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;box-shadow:var(--shadow);margin:0 0 12px}
+.dd-h{font-size:13px;font-weight:700;color:var(--teal-deep);display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.dd-h small{font-weight:400;font-size:10.5px;color:var(--faint)}
+.dd-row{display:flex;gap:10px;padding:6px 0;border-top:1px dashed var(--line);font-size:12px;line-height:1.55}
+.dd-row>span{flex:0 0 88px;color:var(--muted);font-weight:600}
+.dd-row>div{flex:1;min-width:0;color:var(--ink);overflow-wrap:anywhere}
+.day-detail .hint{margin:4px 0 0;font-size:11.5px}
+@media(max-width:420px){
+  .dn-pick{flex-basis:140px;min-width:130px}
+  .dn-today{padding:6px 8px}
+  .dd-row>span{flex-basis:72px}
+  .rhythm-day span{font-size:9px}
+}
