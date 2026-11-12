@@ -20,6 +20,10 @@ window.SCHOOL_CAL = [
     predicted:true,  holidays:[ {from:'2028-01-24', to:'2028-02-06', label:'春节假期（不排课）'} ] },
   { stage:'S7', name:'四下二轮深化与结业期',     start:'2028-02-22', end:'2028-07-03', mode:'term',
     predicted:true,  holidays:[] },
-  { stage:'S8', name:'四年级暑假初中衔接期',     start:'2028-07-04', end:'2028-08-31', mode:'break',
+  { stage:'S8', name:'四年级暑假 · 小学总复习 + 小升初模拟', start:'2028-07-04', end:'2028-08-31', mode:'break',
+    predicted:true,  holidays:[] },
+  { stage:'S9', name:'五年级 · 初中数学（上）',   start:'2028-09-01', end:'2029-07-03', mode:'term',
+    predicted:true,  holidays:[] },
+  { stage:'S10', name:'六年级 · 初中数学（下）',  start:'2029-09-01', end:'2030-07-03', mode:'term',
     predicted:true,  holidays:[] }
 ];

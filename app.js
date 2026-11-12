@@ -6,7 +6,7 @@
 const $  = s => document.querySelector(s);
 const $$ = s => Array.prototype.slice.call(document.querySelectorAll(s));
 const D  = window.APP_DATA;
-const APP_VER = 'v15';   /* 界面上可见的版本号：更新后数字变了，说明新文件已生效 */
+const APP_VER = 'v16';   /* 界面上可见的版本号：更新后数字变了，说明新文件已生效 */
 const GUIDE = window.TOPIC_GUIDE || {};
 const CALC = window.CALC_GUIDE || {};
 const TASKS = D.tasks;
@@ -301,17 +301,81 @@ const GEN={
     if(t===1){ const a=R(12,99),b=R(2,9); return {stem:`${a} × ${b} =`, ans:String(a*b)}; }
     if(t===2) return GEN.decadd(kind);
     return GEN.fracadd(kind);
+  },
+  /* —— 以下为补齐小学五年级/六年级与初中所需的计算类型 —— */
+  fracdiv(kind){            /* 分数除法：除以一个数=乘它的倒数 */
+    const d1=R(2,9),d2=R(2,9),n1=coprimeN(d1),n2=coprimeN(d2);
+    if(kind==='oral'){
+      const t=R(0,2);
+      if(t===0){ const k=R(2,9); return {stem:`${n1}/${d1} ÷ ${k} =（填最简分数）`, ans:F(n1,d1*k)}; }
+      if(t===1){ const k=R(2,9); return {stem:`${k} ÷ ${n1}/${d1} =（填整数或最简分数）`, ans:F(k*d1,n1)}; }
+      return {stem:`${n1}/${d1} ÷ ${n2}/${d2} =（填最简分数）`, ans:F(n1*d2,d1*n2)};
+    }
+    return {stem:`${n1}/${d1} ÷ ${n2}/${d2} =（填最简分数）`, ans:F(n1*d2,d1*n2)};
+  },
+  circle(kind){            /* 圆与扇形：周长/面积/扇形 */
+    const r=R(2,15), pi=3.14;
+    if(kind==='oral'){
+      if(Math.random()<.5) return {stem:`一个圆半径为 ${r} cm，周长是（cm，π 取 3.14）`, ans:NUM(2*pi*r)};
+      return {stem:`一个圆半径为 ${r} cm，面积是（cm²，π 取 3.14）`, ans:NUM(pi*r*r)};
+    }
+    if(Math.random()<.5){ const deg=R(2,6)*30; return {stem:`一个圆半径 ${r} cm，其中 ${deg}° 的扇形面积是（cm²，π 取 3.14）`, ans:NUM(pi*r*r*deg/360)}; }
+    return {stem:`一个圆直径 ${2*r} cm，周长是（cm，π 取 3.14）`, ans:NUM(2*pi*r)};
+  },
+  cyl(kind){              /* 圆柱与圆锥：体积/侧面积/圆锥体积 */
+    const r=R(2,10), h=R(2,15), pi=3.14, t=R(0,2);
+    if(t===0) return {stem:`圆柱底面半径 ${r} cm、高 ${h} cm，体积是（cm³，π 取 3.14）`, ans:NUM(pi*r*r*h)};
+    if(t===1) return {stem:`圆柱底面半径 ${r} cm、高 ${h} cm，侧面积是（cm²，π 取 3.14）`, ans:NUM(2*pi*r*h)};
+    return {stem:`圆锥底面半径 ${r} cm、高 ${h} cm，体积是（cm³，π 取 3.14）`, ans:NUM(pi*r*r*h/3)};
+  },
+  trap(kind){             /* 梯形/平行四边形/三角形面积 */
+    if(kind==='oral'){ const a=R(3,20),b=R(3,20),h=R(2,12); return {stem:`梯形上底 ${a} cm、下底 ${b} cm、高 ${h} cm，面积是（cm²）`, ans:String((a+b)*h/2)}; }
+    if(Math.random()<.5){ const a=R(3,20),b=R(3,20); return {stem:`平行四边形底 ${a} cm、高 ${b} cm，面积是（cm²）`, ans:String(a*b)}; }
+    const base=R(3,20),h=R(2,12); return {stem:`三角形底 ${base} cm、高 ${h} cm，面积是（cm²）`, ans:String(base*h/2)};
+  },
+  solid(kind){            /* 长方体/正方体：体积/表面积 */
+    const a=R(2,12),b=R(2,12),c=R(2,12);
+    if(kind==='oral') return {stem:`长方体长 ${a} cm、宽 ${b} cm、高 ${c} cm，体积是（cm³）`, ans:String(a*b*c)};
+    if(Math.random()<.5) return {stem:`正方体棱长 ${a} cm，表面积是（cm²）`, ans:String(6*a*a)};
+    return {stem:`长方体长 ${a} cm、宽 ${b} cm、高 ${c} cm，表面积是（cm²）`, ans:String(2*(a*b+b*c+a*c))};
+  },
+  real(kind){             /* 初中：实数与二次根式 */
+    if(kind==='oral'){ const a=R(2,12); return {stem:`√${a*a} =`, ans:String(a)}; }
+    const k=R(2,9),a=R(2,9),b=R(2,9); return {stem:`计算 ${a}√${k} + ${b}√${k}（精确到整数）`, ans:String(Math.round((a+b)*Math.sqrt(k)))};
+  },
+  func(kind){             /* 初中：一次函数 / 正比例函数 */
+    if(kind==='oral'){ const k=R(2,6); return {stem:`正比例函数 y = ${k}x，当 x = 3 时 y =`, ans:String(3*k)}; }
+    const k=R(2,5), b=R(1,8), x=R(2,9); return {stem:`一次函数 y = ${k}x + ${b}，当 x = ${x} 时 y =`, ans:String(k*x+b)};
+  },
+  tri(kind){              /* 初中：三角形 / 全等 / 勾股定理 */
+    if(kind==='oral'){ const a=R(3,12),b=R(3,12); return {stem:`直角三角形两直角边 ${a} 和 ${b}，斜边平方是`, ans:String(a*a+b*b)}; }
+    const a=R(3,12),b=R(3,12); return {stem:`直角三角形两直角边 ${a} 和 ${b}，斜边 ≈（保留整数）`, ans:String(Math.round(Math.sqrt(a*a+b*b)))};
+  },
+  quad(kind){             /* 初中：四边形角度性质 */
+    if(kind==='oral'){ const a=R(20,80); return {stem:`平行四边形一个角是 ${a}°，相邻另一个角是（度）`, ans:String(180-a)}; }
+    const a=R(30,80); return {stem:`等腰梯形一个底角是 ${a}°，另一个底角是（度）`, ans:String(a)};
+  },
+  eq2(kind){              /* 初中：二元一次方程组代入求值 */
+    const x=R(1,6), y=R(1,6), a=R(1,4), b=R(1,4);
+    if(kind==='oral') return {stem:`已知 x=${x}, y=${y}，则 ${a}x + ${b}y =`, ans:String(a*x+b*y)};
+    const c=R(1,5); return {stem:`已知 x=${x}, y=${y}，则 ${a}x − ${c}y =`, ans:String(a*x-c*y)};
+  },
+  ineq(kind){             /* 初中：一元一次不等式 */
+    if(kind==='oral'){ const x=R(1,10); return {stem:`不等式 2x > ${2*x-1}，x 可取的最小整数是`, ans:String(x)}; }
+    const a=R(2,6), x=R(1,10), b=R(0,10), rhs=a*x+b; return {stem:`不等式 ${a}x + ${b} > ${rhs-1}（${a}>0），解集起点是 x >（填整数）`, ans:String(x-1)};
   }
 };
 /* 保温类任务（mixed / decmix）按阶段从已学知识点里随机抽，讲解页会把这个池子列出来 */
 function poolForStage(s){
-  return s<=1?['decadd','decmul','decdiv']
-       : s===2?['decadd','decmul','decdiv','eq']
-       : s===3?['decadd','fracbase','fracadd','numth']
-       : s===4?['fracadd','fracmul','decdiv','eq']
-       : s===5?['ratio','percent','fracmul']
-       : s<=7?['fracmul','ratio','percent','numth']
-       : ['junior','fracmul'];
+  if(s<=1) return ['decadd','decmul','decdiv'];
+  if(s===2) return ['decadd','decmul','decdiv','eq'];
+  if(s===3) return ['decadd','fracbase','fracadd','fracdiv','numth'];
+  if(s===4) return ['fracadd','fracmul','decdiv','eq','circle'];
+  if(s===5) return ['ratio','percent','fracmul','fracdiv','trap','solid'];
+  if(s===6) return ['fracmul','ratio','percent','numth','circle','trap','solid','cyl'];
+  if(s===7) return ['fracmul','ratio','percent','numth','circle','trap','solid','cyl','real'];
+  if(s===8) return ['decadd','fracbase','fracadd','fracdiv','ratio','percent','circle','trap','solid','cyl']; /* 四年级暑假·小学总复习 */
+  return ['junior','real','func','tri','quad','eq2','ineq','fracmul']; /* 初中 S9/S10 */
 }
 function effectiveTag(task){
   const tag=task.calcTag;
