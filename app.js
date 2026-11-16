@@ -6,7 +6,7 @@
 const $  = s => document.querySelector(s);
 const $$ = s => Array.prototype.slice.call(document.querySelectorAll(s));
 const D  = window.APP_DATA;
-const APP_VER = 'v21';   /* 界面上可见的版本号：更新后数字变了，说明新文件已生效 */
+const APP_VER = 'v22';   /* 界面上可见的版本号：更新后数字变了，说明新文件已生效 */
 const GUIDE = window.TOPIC_GUIDE || {};
 const CALC = window.CALC_GUIDE || {};
 const TASKS = D.tasks;
@@ -424,6 +424,8 @@ function addMistake(o){
   const m={ id:uid(), date:d, taskId:o.taskId||'', stage:o.stage||'', tag:o.tag||'综合',
     topicTag:topicTagOf({tag:o.tag,topicTag:o.topicTag}), source:o.source||'', type:o.type||'calc',
     question:o.question||'', imageKey:o.imageKey||'', fileKey:o.fileKey||'', fileName:o.fileName||'', fileType:o.fileType||'',
+    /* v22：整份文件合集 —— 一条记录代表某个专题的一整份文件，fileSeq 是该专题下按上传顺序的编号 */
+    fileBatch:!!o.fileBatch, fileSeq:o.fileSeq||0,
     childAnswer:o.childAnswer||'', correctAnswer:o.correctAnswer||'',
     reason:o.reason||'思路错误', note:o.note||'', cycleStart:d, reviews:mkReviews(d), streak:0, status:'active', history:[] };
   S.mistakes.unshift(m); save(); return m;
@@ -2502,16 +2504,27 @@ document.addEventListener('click',e=>{
     case 'week-video': weekVideoToggle(parseInt(id,10)); break;
     case 'week-video-ok': weekVideoNone(); break;
     case 'week-calc': weekOpenCalc(id); break;
-    case 'week-calc-submit': weekCalcSubmit(); break;
-    case 'week-calc-again': { const ds=WK_CALC?WK_CALC.ds:activeDate(); WK_CALC=null; weekOpenCalc(ds); } break;
+    case 'week-calc-done': weekCalcDone(id); break;
+    case 'week-review-done': weekReviewDone(); break;
     case 'week-calc-edit': openWeekCalcEdit(); break;
     case 'week-calcedit-save': weekCalcEditSave(); break;
     case 'week-upload': weekOpenUpload(); break;
+    case 'week-up-mode': {
+      const seg=el.parentNode; if(seg) Array.from(seg.children).forEach(b=>b.classList.toggle('on',b===el));
+      WK_UP.mode=el.dataset.v;
+      renderWeekUploadBody();   /* 渲染对应模式的内容（首次切到文件模式时下拉还没生成） */
+      $('#wuSingle').classList.toggle('hidden',WK_UP.mode!=='single');
+      $('#wuFileBody').classList.toggle('hidden',WK_UP.mode!=='file');
+      break; }
     case 'week-up-photo': { const f=$('#wuFile'); if(f) f.click(); break; }
+    case 'week-up-file-pick': { const f=$('#wuFFile'); if(f) f.click(); break; }
+    case 'week-up-file-save': weekFileSave(); break;
     case 'week-up-kind': { WK_UP.kind=el.dataset.v;
       $$('#wuSeg .seg-b').forEach(x=>x.classList.toggle('on',x.dataset.v===WK_UP.kind)); renderWeekUploadCats(); break; }
     case 'week-up-save': weekUploadSave(); break;
     case 'week-gate': weekOpenGate(); break;
+    case 'week-gate-copy': weekGateCopy(); break;
+    case 'week-gate-save': weekGateSave(); break;
     case 'week-redo': { const ids=dueMistakes().map(m=>m.id); if(ids.length) startRedoQueue(ids); break; }
     case 'week-prev': weekViewShift(-1); break;
     case 'week-next': weekViewShift(1); break;
@@ -2569,6 +2582,7 @@ document.addEventListener('click',e=>{
     case 'wp-toggle': wpToggleTask(parseInt(el.dataset.no,10)); break;
     case 'wp-task': wpOpenTask(parseInt(el.dataset.no,10)); break;
     case 'wp-view-week': wpViewWeek(el.dataset.v); break;
+    case 'clear-cache': clearCacheAndReload(); break;
     case 'open-wrong-browse': openWrongBrowse(); break;
     case 'wrong-browse': openWrongBrowse(); break;
     case 'bf-quick': {
@@ -2656,6 +2670,8 @@ document.addEventListener('change',e=>{
   if((t.id==='wordFile'||t.id==='inboxFile')&&t.files[0]){ handlePhoto(t.files[0]); return; }
   if(t.id==='attachFile'&&t.files[0]){ attachFilePicked(t.files[0]); return; }
   if(t.id==='wuFile'&&t.files[0]){ weekUploadPicked(t.files[0]); t.value=''; return; }
+  if(t.id==='wuFFile'&&t.files[0]){ weekFilePicked(t.files[0]); t.value=''; return; }
+  if(t.id==='wuFTopic'){ updateFileSeqHint(); return; }
   if(t.id==='taskStageFilter'||t.id==='taskStateFilter'){ renderTasks(); return; }
   if(t.id==='inboxWrong'){ const w=$('#inboxReasonWrap'); if(w) w.classList.toggle('hidden',!t.checked); return; }
   if(t.id==='attachToWrong'){ const w=$('#attachReasonWrap'); if(w) w.classList.toggle('hidden',!t.checked); return; }
@@ -2774,13 +2790,16 @@ function weekCalcCfg(w,ds){
   const ws=weekState(), k=`W${pad2(w)}/c/${ds}`;
   return ws.calc[k] || weekCalcDefault(w);
 }
-/* 本周步骤序列（串行）：视频 → 每日计算 → 周末错题上传 → 阶段达标（若有） */
+/* 本周四项打卡（当天四类互不锁，先做哪个都行）：
+   ① 本周视频 ② 每日计算（线下买题，只记录内容+打钩，不出题判分）③ 回炉专题（每周一个）④ 周末错题上传
+   阶段达标测试是序列关卡，关卡周额外多一项。 */
 function weekSteps(w){
   const wk=wkAt(w); if(!wk) return [];
   const steps=[];
   const vids=(wk.videos||[]).filter(v=>!v.opt);
   if(vids.length) steps.push({kind:'video',key:`W${pad2(w)}/video`,label:'本周视频',n:vids.length});
   steps.push({kind:'calc',key:`W${pad2(w)}/calc`,label:'每日计算',n:3});
+  steps.push({kind:'review',key:`W${pad2(w)}/review`,label:'回炉专题',n:1});
   steps.push({kind:'upload',key:`W${pad2(w)}/upload`,label:'周末错题上传',n:1});
   if(wk.test) steps.push({kind:'gate',key:`W${pad2(w)}/gate`,label:'阶段达标测试',n:1});
   return steps;
@@ -2791,12 +2810,64 @@ function stepDone(ws,w,st){
     return vids.length>0 && vids.every((v,i)=>!!ws.done[`W${pad2(w)}/v${i}`]);
   }
   if(st.kind==='calc'){
-    const wk=wkAt(w)||{}, s0=new Date(wk.start+'T00:00:00');
+    const wk=wkAt(w)||{};
     let doneD=0;
     for(let i=0;i<7;i++){ const ds=addDays(wk.start,i); if(ws.done[`W${pad2(w)}/c/${ds}`]) doneD++; }
     return doneD>=3;
   }
   return !!ws.done[st.key];
+}
+/* 本周回炉专题名（去掉「（一轮）/（二轮）」后缀），用于到错题库找对应错题 */
+function reviewTopics(w){
+  const wk=wkAt(w)||{};
+  return (wk.review||[]).map(x=>String(x).replace(/（[^）]*）$/,'').trim()).filter(Boolean);
+}
+/* 执行表回炉专题名（如「和差问题」）与错题库专题名（keyPoints 里的「和差倍」）不同名，做一层别名对应 */
+const REVIEW_ALIAS={ '和差问题':'和差倍','和倍问题':'和差倍','差倍问题':'和差倍','和差倍综合':'和差倍',
+  '年龄问题':'年龄','还原问题':'还原与间隔','还原问题（倒推）':'还原与间隔','盈亏问题':'盈亏',
+  '平均数问题':'平均与容斥','归一归总问题':'平均与容斥','周期问题':'周期与日期','双周期与最小公倍数':'周期与日期',
+  '日期推算':'周期与日期','等差数列':'等差数列','直线植树':'还原与间隔','封闭图形植树':'还原与间隔',
+  '爬楼梯问题':'还原与间隔','敲钟问题':'还原与间隔','蜗牛爬井':'还原与间隔','环形插旗与嵌套间隔':'还原与间隔',
+  '路标与费用':'还原与间隔','鸡兔同笼':'鸡兔同笼','鸡兔同笼变式':'鸡兔同笼','容斥原理':'平均与容斥',
+  '容斥与倍数结合':'平均与容斥','有序枚举':'计数','标数法与递推计数':'计数','图形计数':'计数',
+  '逻辑推理':'综合','数阵图与幻方':'综合','算式谜与数字谜':'综合','巧求周长':'几何平面','统筹与优化':'综合',
+  '集合与韦恩图':'平均与容斥','编码与数字问题':'综合','操作类智巧趣题':'综合' };
+function topicMatch(a,b){
+  if(!a||!b) return false;
+  if(a===b||a.indexOf(b)>=0||b.indexOf(a)>=0) return true;
+  const na=REVIEW_ALIAS[a]||a, nb=REVIEW_ALIAS[b]||b;
+  return na===nb||na.indexOf(nb)>=0||nb.indexOf(na)>=0;
+}
+function reviewMistakes(w){
+  const names=reviewTopics(w); if(!names.length) return [];
+  return (S.mistakes||[]).filter(m=>m.status==='active'&&names.some(n=>
+    topicMatch(topicTagOf(m),n)||topicMatch(m.tag||'',n)));
+}
+/* 错题的「线下定位」：整份文件显示《专题-NN》，单题显示专题+题干片段。
+   家长据此在线下把对应纸质件找出来重做。 */
+function mistakeRef(m){
+  if(m.fileBatch) return `《${fileBatchName(topicTagOf(m),m.fileSeq)}》文件`+(m.fileName?`（${m.fileName}）`:'');
+  return esc(clip(m.question||m.fileName||'（见附件）',46));
+}
+/* 周末复盘：按 1/3/7 到期的题，按专题分组，提醒家长线下找出重做。
+   包含之前累积到期的题（不只本周新传的）。 */
+function weekendReviewHTML(w){
+  const due=dueMistakes();
+  const wk=wkAt(w)||{}, wStart=wk.start||'', wEnd=wk.end||addDays(wStart,6);
+  const thisWeekNew=(S.mistakes||[]).filter(m=>m.date>=wStart&&m.date<=wEnd).length;
+  if(!due.length){
+    return `<div class="wk-memo"><div class="wm-h">🔁 周末复习提醒<span>${thisWeekNew} 道本周新错题</span></div>
+      <p class="hint">目前没有到期的旧错题。新传的错题会在第 1 / 3 / 7 天自动出现在这里提醒你线下重做。</p></div>`;
+  }
+  const groups={};
+  due.forEach(m=>{ const t=topicTagOf(m); (groups[t]=groups[t]||[]).push(m); });
+  const gkeys=Object.keys(groups).sort((a,b)=>groups[b].length-groups[a].length);
+  return `<div class="wk-memo"><div class="wm-h">🔁 周末复习提醒<span>到期 ${due.length} 道 · 本周新传 ${thisWeekNew} 道</span></div>
+    <p class="hint">除了本周新错题，这些是之前错了、按 <b>1 / 3 / 7 天</b>记忆曲线今天该再复习的。按下面的「专题 + 序号/题」线下找出来给孩子重做，回来点结果：连对 2 次移出，又错则重新排期。</p>
+    ${gkeys.map(t=>`<div class="wm-grp"><div class="wm-grp-h">${esc(t)} <small>${groups[t].length} 道</small></div>
+      ${groups[t].map(m=>`<div class="wm-item"><span>${mistakeRef(m)}</span>
+        <span class="wm-btns"><button class="btn tiny ghost" data-action="review-ok" data-id="${esc(m.id)}">做对了</button><button class="btn tiny ghost" data-action="review-fail" data-id="${esc(m.id)}">又错了</button></span></div>`).join('')}</div>`).join('')}
+    <div class="btn-row"><button class="btn tiny ghost" data-action="go-wrong">去错题本查看全部</button></div></div>`;
 }
 function weekDone(ws,w){ const ss=weekSteps(w); return ss.length>0 && ss.every(st=>stepDone(ws,w,st)); }
 /* v21：当天三类任务互不锁。视频之间的先后顺序由 WPTASKS 全局序号控制，不在这里锁。 */
@@ -2860,9 +2931,8 @@ function renderWeek(){
   const ws=weekState(), w=wkViewWeek(), wk=wkAt(w), ct=wpCurTask(), cursor=wpCursor(ws);
   const ts=$('#topStage'); if(ts) ts.textContent = wk ? `第 ${w}/94 周 · ${wk.stage}` : '94 周打卡';
   if(!wk){ root.innerHTML='<div class="card">94 周数据未加载，请确认 weekplan.js 已上传。</div>'; return; }
-  const recycled=weekRecycle(w);
+  weekRecycle(w);   /* 复活二轮错题（副作用），渲染在周末提醒/错题本里体现 */
   const fc=weekForecast();
-  const todayDue=dueMistakes();
   const strong=fc.etaDrift>14?'落后':(fc.etaDrift<-14?'领先':'正常');
 
   /* 当前任务（全局序号）。落后就停在这项，不会跳到日历上「今天该做」的那项 */
@@ -2906,14 +2976,6 @@ function renderWeek(){
   });
   html+=`</div>`;
 
-  // 今日错题重做（记忆曲线）
-  html+=`<div class="wk-redo card"><div class="wk-redo-h"><b>🔁 今日错题重做</b><span>${todayDue.length} 道到期${recycled?` · 二轮重现 ${recycled} 道`:''}</span></div>
-    ${todayDue.length?`<p class="hint">按 1 / 3 / 7 天记忆曲线到期。连对 2 次会暂时移出错题本；二轮学到对应专题时会再出现。</p>
-      <div class="btn-row"><button class="btn" data-action="week-redo">开始重做这 ${todayDue.length} 道</button>
-      <button class="btn ghost" data-action="go-wrong">去错题本</button></div>`
-      :`<p class="hint">今天没有到期错题。周末把本周错题上传进来，系统会排进后续每天的任务。</p>
-      <div class="btn-row"><button class="btn ghost" data-action="week-upload">📤 上传本周错题</button></div>`}</div>`;
-
   // 周切换
   html+=`<div class="wk-nav">
     <button class="btn ghost" data-action="week-prev" ${w<=1?'disabled':''}>‹ 看上一周</button>
@@ -2950,32 +3012,46 @@ function weekStepBody(w,st,unlocked,done){
     const days=[];
     for(let i=0;i<7;i++){ const ds=addDays(wk.start,i); const d=ws.done[`W${pad2(w)}/c/${ds}`];
       const dow=['日','一','二','三','四','五','六'][new Date(ds+'T00:00:00').getDay()];
-      const cfg=weekCalcCfg(w,ds);
+      const cfg=weekCalcCfg(w,ds), txt=weekCalcText(w,ds);
       days.push(`<div class="wk-cday ${d?'ok':''}"><div class="wcd-top"><b>周${dow}</b><small>${ds.slice(5)}</small></div>
-        <div class="wcd-tags">${cfg.map(c=>`<span>${esc(calcName(c.tag))} ${c.n}题</span>`).join('')}</div>
-        <button class="btn tiny ${d?'ghost':''}" data-action="week-calc" data-id="${ds}">${d?'✓ '+cnDate(d):'做题并打钩'}</button></div>`);
+        <div class="wcd-tags">${txt?`<span>${esc(txt)}</span>`:cfg.map(c=>`<span>${esc(calcName(c.tag))} ${c.n}题</span>`).join('')}</div>
+        <button class="btn tiny ${d?'ghost':''}" data-action="week-calc" data-id="${ds}">${d?'✓ '+cnDate(d):'记录并打钩'}</button></div>`);
     }
-    return `<p class="hint">每天纸笔保温；点某天做题，判分后打钩。本周至少完成 3 天（周一三五）即算达标，多做的都记下来。</p>
+    return `<p class="hint">线下买的计算题，每天做完在这里<b>填今天做了什么 + 打钩</b>即可，不用在线做题、也不用再录答案。本周至少完成 3 天（周一三五）即算达标，多做的都记下来。</p>
       <div class="wk-cgrid">${days.join('')}</div>
-      <div class="btn-row"><button class="btn ghost" data-action="week-calc-edit">调整每日题型 / 题量</button></div>`;
+      <div class="btn-row"><button class="btn ghost" data-action="week-calc-edit">调整本周计算内容</button></div>`;
+  }
+  if(st.kind==='review'){
+    const names=reviewTopics(w), list=reviewMistakes(w), d=ws.done[`W${pad2(w)}/review`];
+    const how=(wk.reviewHow||'原题重做（不看书）→ 同类变式 2–3 题 → 全对才打钩；★ 不看视频。');
+    if(!names.length) return `<p class="hint">本周执行表没有安排回炉专题，这一项可跳过。</p>
+      <div class="btn-row"><button class="btn ghost" data-action="week-review-done">${d?'✓ 已完成':'标记无需回炉'}</button></div>`;
+    return `<p class="hint">本周回炉 <b>${names.map(esc).join('、')}</b>：把当时做这个专题时错过的题再做一遍，看会了没有。<b>直接做错题，不看视频。</b></p>
+      <div class="rv-box"><div class="rv-how">${esc(how)}</div>
+        ${list.length?`<div class="rv-list">${list.slice(0,12).map(m=>`<div class="rv-item">${mistakeRef(m)}<small>${esc(topicTagOf(m))}${m.fileBatch?' · 该文件':''}</small>
+          <button class="linkbtn" data-action="view-wrong" data-id="${esc(m.id)}">查看 ›</button></div>`).join('')}${list.length>12?`<div class="rv-more">…另有 ${list.length-12} 道，到错题本查看</div>`:''}</div>`
+          :`<div class="rv-none">这个专题目前没有在册错题。到周末上传时，把孩子这周做错的该专题题传进来；或直接在错题本里加一道。</div>`}
+      </div>
+      <div class="btn-row"><button class="btn ${d?'ghost':''}" data-action="week-review-done">${d?'✓ '+cnDate(d)+' 已完成 · 点此取消':'✓ 本周回炉做完了，打钩'}</button>
+        <button class="btn ghost" data-action="go-wrong">去错题本</button></div>`;
   }
   if(st.kind==='upload'){
     const d=ws.done[`W${pad2(w)}/upload`];
-    return `<p class="hint">周末把本周孩子做错的题上传：拍照或输入题目，<b>自己选归到哪个专题或计算类型</b>，系统按 1/3/7 天排进之后的每日重做。</p>
-      <div class="btn-row"><button class="btn ${d?'ghost':''}" data-action="week-upload">${d?'✓ 本周已上传 · 再传几道':'📤 上传本周错题'}</button></div>
-      ${d?`<p class="hint">已于 ${esc(d)} 上传。</p>`:''}`;
+    return `<p class="hint">周末把本周孩子做错的题传进来：<b>视频后练习题、线下计算题、回炉专题又错的题</b>都可以。单题拍照/打字，或整份文件一次传（自动按专题编号）。</p>
+      <div class="btn-row"><button class="btn ${d?'ghost':''}" data-action="week-upload">${d?'✓ 本周已上传 · 再传':'📤 上传本周错题'}</button></div>
+      ${d?`<p class="hint">已于 ${esc(d)} 上传。</p>`:''}
+      ${weekendReviewHTML(w)}`;
   }
   if(st.kind==='gate'){
     const g=ws.gate[`W${pad2(w)}`];
-    return `<p class="hint">到下一阶段前的出口测试：工作台按本周知识点出 6 道计算 + 4 道应用题，≥80% 才放行。</p>
-      <div class="btn-row"><button class="btn ${g&&g.passed?'ghost':''}" data-action="week-gate">${g&&g.passed?`✓ 已通过 ${g.rate}% · 可再测`:'📝 开始达标测试'}</button></div>
+    return `<p class="hint">${esc(wk.gate||'到下一专题前的达标测试')}。工作台给出一段 AI 关键词（本阶段全部所学内容），你复制去让 AI 出题、孩子线下做，回来填达标率；≥80% 才放行。</p>
+      <div class="btn-row"><button class="btn ${g&&g.passed?'ghost':''}" data-action="week-gate">${g&&g.passed?`✓ 已通过 ${g.rate}% · 可再测`:'📝 打开 AI 出题关键词 / 填达标率'}</button></div>
       ${g?`<p class="hint">最近一次：${g.rate}% · ${g.passed?'通过':'未过'} · ${esc(g.at)}</p>`:''}`;
   }
   return '';
 }
 
-/* ---------- v20 交互 ---------- */
-let WK_CALC=null;   // 当前每日计算练习
+/* ---------- 本周打卡交互 ---------- */
 function weekVideoToggle(no){
   const ws=weekState(), cursor=wpCursor(ws);
   const t=WPTASKS.find(x=>x.no===no&&x.kind==='video');
@@ -2992,75 +3068,140 @@ function weekVideoNone(){
   if(vids.length) return;
   ws.done[`W${pad2(w)}/video`]=activeDate(); save(); renderAll(); toast('✓ 已确认');
 }
-/* 每日计算：用本周类型的题生成一套，判分后打钩 */
+/* 每日计算：线下买题做，工作台只记录「今天做了什么」+打钩，不出题、不判分、不录答案。
+   内容存在 ws.calc[W##/c/日期]（数组 [{tag,n,text}]），text 是家长填的实际题单说明。 */
+function weekCalcText(w,ds){
+  const cfg=weekCalcCfg(w,ds);
+  return cfg.filter(c=>c.text).map(c=>c.text).join('、')||'';
+}
 function weekOpenCalc(ds){
-  const ws=weekState(), w=wkViewWeek(), cfg=weekCalcCfg(w,ds);
-  const items=[];
-  cfg.forEach(c=>{
-    const fn=GEN[c.tag]||GEN.mixed, half=Math.ceil(c.n/2);
-    for(let i=0;i<c.n;i++){ const q=fn(i<half?'oral':'written');
-      items.push(Object.assign({kind:i<half?'口算':'笔算',tag:c.tag,key:uid()},q,{given:'',ok:null})); }
-  });
-  WK_CALC={w,ds,items,submitted:false,rate:null};
-  openSheet(`第 ${w} 周 · ${cnDate(ds)} 每日计算`, `<div id="wkcBox"></div>`);
-  renderWeekCalc();
+  const w=wkViewWeek(), ws=weekState(), cfg=weekCalcCfg(w,ds);
+  const d=ws.done[`W${pad2(w)}/c/${ds}`];
+  const suggest=cfg.map(c=>calcName(c.tag)+' '+c.n+'题').join('、');
+  const cur=weekCalcText(w,ds);
+  openSheet(`第 ${w} 周 · ${cnDate(ds)} · 每日计算`, `
+    <div class="card"><p class="hint">线下买的计算题，做完在这里记一句「今天做了什么」再打钩即可。<b>不用在线做题，也不用录每题答案。</b>本周至少 3 天打钩算达标。</p>
+      <label class="lbl">今天做的计算内容</label>
+      <input type="text" id="wccText" value="${esc(cur||suggest)}" placeholder="例如：口算本 P12 小数乘法 20 题 + 竖式 10 题">
+      <p class="hint">建议（按本周执行表题型）：${esc(suggest||'按本周计算安排')}</p>
+      <div class="btn-row">
+        <button class="btn" data-action="week-calc-done" data-id="${ds}">${d?'✓ 已打钩 · 保存并取消打钩':'✓ 做完了，打钩'}</button>
+        <button class="btn ghost" data-action="close-sheet">关闭</button></div>
+    </div>`);
 }
-function renderWeekCalc(){
-  const box=$('#wkcBox'); if(!box||!WK_CALC) return;
-  if(!WK_CALC.submitted){
-    box.innerHTML=`<div class="card"><p class="hint">共 ${WK_CALC.items.length} 题，填答案自动判分。${esc(calcName(WK_CALC.items[0]?WK_CALC.items[0].tag:''))} 等本周类型，做完点提交。</p>
-      ${WK_CALC.items.map((it,i)=>`<div class="q-item" id="wq-${i}"><span class="qn">${i+1}</span><span class="qs">${esc(it.stem)}</span><input type="text" inputmode="decimal" data-wi="${i}" placeholder="答案"><span class="mark"></span></div>`).join('')}
-      <div class="btn-row"><button class="btn" data-action="week-calc-submit">提交判分并打钩</button></div></div>`;
-  } else {
-    const right=WK_CALC.items.filter(x=>x.ok).length;
-    box.innerHTML=`<div class="result-box ${WK_CALC.rate>=80?'':'bad'}">正确率 ${WK_CALC.rate}%（${right}/${WK_CALC.items.length}）</div>
-      <div class="card"><p class="hint">${WK_CALC.rate>=80?'✅ 达标。这天的计算已完成并打钩。':'未达 80%，错的题已进错题本。要不要再练一套？'}</p>
-      <div class="btn-row"><button class="btn" data-action="week-calc-again">再做一套</button>
-      ${WK_CALC.rate>=80?'<button class="btn ghost" data-action="close-sheet">完成</button>':''}</div></div>`;
+function weekCalcDone(ds){
+  const w=wkViewWeek(), ws=weekState(), key=`W${pad2(w)}/c/${ds}`;
+  const txt=($('#wccText')&&$('#wccText').value.trim())||'';
+  if(txt){
+    const cfg=weekCalcCfg(w,ds).map(c=>Object.assign({},c));
+    if(cfg.length) cfg[0].text=txt; else cfg.push({tag:'mixed',n:0,text:txt});
+    ws.calc[key]=cfg;
   }
+  if(ws.done[key]){ delete ws.done[key]; toast('已取消这一天的打钩'); }
+  else ws.done[key]=activeDate();
+  save(); closeSheet(); renderAll();
+  if(ws.done[key]) toast('✓ 这一天计算已记录并打钩');
 }
-function weekCalcSubmit(){
-  if(!WK_CALC||WK_CALC.submitted) return;
-  WK_CALC.items.forEach((it,i)=>{
-    const el=document.querySelector(`[data-wi="${i}"]`);
-    it.given=el?el.value.trim():''; it.ok=isRight(it.given,it.ans);
-    if(!it.ok) addMistake({taskId:'',stage:'W'+pad2(WK_CALC.w),tag:calcName(it.tag),type:'calc',date:activeDate(),
-      question:it.stem,childAnswer:it.given||'(未填)',correctAnswer:it.ans,reason:'计算失误'});
-  });
-  const right=WK_CALC.items.filter(x=>x.ok).length;
-  WK_CALC.rate=Math.round(right/WK_CALC.items.length*100); WK_CALC.submitted=true;
-  const ws=weekState(), k=`W${pad2(WK_CALC.w)}/c/${WK_CALC.ds}`;
-  if(WK_CALC.rate>=80) ws.done[k]=activeDate();
-  save(); renderWeekCalc(); renderAll();
+function weekReviewDone(){
+  const ws=weekState(), w=wkViewWeek(), key=`W${pad2(w)}/review`;
+  if(ws.done[key]){ delete ws.done[key]; toast('已取消回炉打钩'); }
+  else ws.done[key]=activeDate();
+  save(); renderAll();
+  if(ws.done[key]) toast('✓ 本周回炉已打钩');
 }
-/* 错题上传：拍照/输入 + 自己选类别（专题或计算） */
-let WK_UP={imageKey:''};
+/* 错题上传：单题拍照/输入 + 整份文件合集（按专题上传顺序自动编号）
+   这份工作台是给家长记录用的；孩子不在这里做题。 */
+let WK_UP={imageKey:'',mode:'single',file:null,dataURL:''};
+const WK_FILE_MAX=12*1024*1024;
+/* 某专题下已归档的文件份数 +1（按上传顺序编号） */
+function nextFileSeq(topic){
+  let n=0; (S.mistakes||[]).forEach(m=>{ if(m.fileBatch && (topicMatch(topicTagOf(m),topic)||topicMatch(m.tag||'',topic))) n++; });
+  return n+1;
+}
+function fileBatchName(topic,seq){ return topic+'-'+String(seq).padStart(2,'0'); }
 function weekOpenUpload(){
-  WK_UP={imageKey:''};
+  WK_UP={imageKey:'',mode:'single',file:null,dataURL:''};
   const cats=TOPIC_LIST().slice();
   const calcNames=Object.keys(D.calcTagNames||{}).map(k=>D.calcTagNames[k]);
-  openSheet('上传本周错题 · 自己选类别', `
-    <div class="card"><h3>把本周做错的题录进来</h3>
-      <p class="hint">拍照或输入题目，<b>你自己选它归到哪个专题或计算类型</b>——这样最准。系统会按 1/3/7 天把它排进之后每天的「错题重做」；连对 2 次暂时移出，二轮学到对应专题时再出现。</p>
-      <label class="lbl">错题日期（补录旧题就改这里）</label>
-      <input type="date" id="wuDate" value="${activeDate()}">
-      <div class="btn-row"><button class="btn ghost" data-action="week-up-photo">📷 拍照 / 选图</button></div>
-      <input type="file" id="wuFile" accept="image/*" hidden>
-      <div id="wuImg"></div>
-      <label class="lbl">题目文字（可只传图不填字）</label>
-      <textarea id="wuText" placeholder="例如：每人分 5 颗多 2 颗，每人分 7 颗少 6 颗，求人数。"></textarea>
-      <label class="lbl">归到哪一类 —— 先选「专题」还是「计算」</label>
-      <div class="seg" id="wuSeg"><button class="seg-b on" data-action="week-up-kind" data-v="word">专题应用题</button><button class="seg-b" data-action="week-up-kind" data-v="calc">计算</button></div>
-      <div id="wuCatBox"></div>
-      <label class="lbl">孩子的答案 / 正确答案（可不填）</label>
-      <input type="text" id="wuChild" placeholder="孩子写的答案"><input type="text" id="wuCorrect" placeholder="正确答案">
-      <label class="lbl">错在哪</label>
-      <select id="wuReason">${D.reasons.map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('')}</select>
-      <input type="text" id="wuNote" placeholder="补一句具体原因（可不填）">
-      <div class="btn-row"><button class="btn" data-action="week-up-save">✓ 保存到错题本并排进每日重做</button></div>
+  openSheet('上传本周错题', `
+    <div class="card"><h3>把本周孩子做错的题录进来</h3>
+      <p class="hint">这是<b>给家长记录用</b>的工作台。两种方式：单题拍照/打字，或整份文件一次传（某个专题的错题合集，不用一题一题录）。录进来后按 1 / 3 / 7 天提醒你线下找出来重做；连对 2 次移出，二轮学到对应专题再出现。</p>
+      <div class="seg" id="wuMode"><button class="seg-b on" data-action="week-up-mode" data-v="single">📷 单题拍照 / 输入</button><button class="seg-b" data-action="week-up-mode" data-v="file">📄 整份文件合集</button></div>
+      <div id="wuSingle"></div><div id="wuFileBody" class="hidden"></div>
     </div>`);
   WK_UP.kind='word'; WK_UP.cats=cats; WK_UP.calcNames=calcNames;
+  renderWeekUploadBody();
+}
+function renderWeekUploadBody(){
+  if(WK_UP.mode==='file'){
+    const box=$('#wuFileBody'); if(!box) return;
+    box.innerHTML=`
+      <label class="lbl">这份文件属于哪个专题</label>
+      <select id="wuFTopic">${WK_UP.cats.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}</select>
+      <p class="hint" id="wuFSeqHint"></p>
+      <div class="btn-row"><button class="btn ghost" data-action="week-up-file-pick">📎 选择文件（PDF / Word / 多图合集）</button></div>
+      <input type="file" id="wuFFile" hidden>
+      <div id="wuFInfo" class="attach-info">还没选文件</div>
+      <label class="lbl">错题日期（补录旧题就改这里）</label>
+      <input type="date" id="wuDate" value="${activeDate()}">
+      <label class="lbl">备注（可不填）</label>
+      <input type="text" id="wuFNote" placeholder="例如：鸡兔同笼错题 8 道，重点第 3、7 题">
+      <div class="btn-row"><button class="btn" data-action="week-up-file-save">✓ 保存这份文件并编号</button></div>
+      <p class="hint">📌 文件本体只存在这台设备；专题、编号、复习日期会同步。到复习日工作台会提醒你「复习《专题-NN》这份文件」，你线下找出来给孩子重做，再回来判对错。</p>`;
+    updateFileSeqHint();
+    return;
+  }
+  const box=$('#wuSingle'); if(!box) return;
+  box.innerHTML=`
+    <label class="lbl">错题日期（补录旧题就改这里）</label>
+    <input type="date" id="wuDate" value="${activeDate()}">
+    <div class="btn-row"><button class="btn ghost" data-action="week-up-photo">📷 拍照 / 选图</button></div>
+    <input type="file" id="wuFile" accept="image/*" hidden>
+    <div id="wuImg"></div>
+    <label class="lbl">题目文字（可只传图不填字）</label>
+    <textarea id="wuText" placeholder="例如：每人分 5 颗多 2 颗，每人分 7 颗少 6 颗，求人数。"></textarea>
+    <label class="lbl">归到哪一类 —— 先选「专题」还是「计算」</label>
+    <div class="seg" id="wuSeg"><button class="seg-b on" data-action="week-up-kind" data-v="word">专题应用题</button><button class="seg-b" data-action="week-up-kind" data-v="calc">计算</button></div>
+    <div id="wuCatBox"></div>
+    <label class="lbl">孩子的答案 / 正确答案（可不填）</label>
+    <input type="text" id="wuChild" placeholder="孩子写的答案"><input type="text" id="wuCorrect" placeholder="正确答案">
+    <label class="lbl">错在哪</label>
+    <select id="wuReason">${D.reasons.map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('')}</select>
+    <input type="text" id="wuNote" placeholder="补一句具体原因（可不填）">
+    <div class="btn-row"><button class="btn" data-action="week-up-save">✓ 保存这一题</button></div>`;
   renderWeekUploadCats();
+}
+function updateFileSeqHint(){
+  const sel=$('#wuFTopic'), hint=$('#wuFSeqHint'); if(!sel||!hint) return;
+  const seq=nextFileSeq(sel.value);
+  hint.innerHTML=`保存后命名为 <b>${esc(fileBatchName(sel.value,seq))}</b>（这个专题第 ${seq} 份，以后再传会自动接着编号）`;
+}
+async function weekFilePicked(file){
+  if(!file) return;
+  if(file.size>WK_FILE_MAX){ toast('文件超过 12MB，请压缩或拆成几份再传'); return; }
+  try{
+    const data=await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error); r.readAsDataURL(file); });
+    WK_UP.file=file; WK_UP.dataURL=data;
+    const info=$('#wuFInfo');
+    if(info) info.innerHTML=`<b>📎 ${esc(file.name)}</b><small>${(file.size/1024).toFixed(0)} KB ｜ ${esc(file.type||'未知格式')}</small>`;
+    toast('✓ 文件已就绪');
+  }catch(e){ toast('读取文件失败：'+(e.message||e)); }
+}
+async function weekFileSave(){
+  if(!WK_UP.file||!WK_UP.dataURL){ toast('请先选择文件'); return; }
+  const topic=$('#wuFTopic')?$('#wuFTopic').value:'综合';
+  const seq=nextFileSeq(topic), name=fileBatchName(topic,seq);
+  const d=($('#wuDate')&&$('#wuDate').value)||activeDate();
+  const note=($('#wuFNote')&&$('#wuFNote').value.trim())||'';
+  const key='att:'+uid();
+  try{ await IMG.put(key,WK_UP.dataURL); }
+  catch(e){ toast((e&&e.message)||'文件保存失败，可能存储空间不足'); return; }
+  addMistake({taskId:'',stage:'第'+wkViewWeek()+'周',tag:topic,topicTag:topic,type:'file',source:'文件合集',date:d,
+    question:'📄《'+name+'》'+(WK_UP.file.name?'（'+WK_UP.file.name+'）':''),
+    fileKey:key,fileName:WK_UP.file.name||name,fileType:WK_UP.file.type||'',fileBatch:true,fileSeq:seq,
+    reason:'待线下重做判定',note:note});
+  const ws=weekState(), vw=wkViewWeek(); WK_VIEW=null; ws.done[`W${pad2(vw)}/upload`]=activeDate();
+  save(); closeSheet(); renderAll(); toast('✓ 已存为《'+name+'》，按 1 / 3 / 7 天排进复习提醒');
 }
 function renderWeekUploadCats(){
   const box=$('#wuCatBox'); if(!box||!WK_UP) return;
@@ -3148,31 +3289,97 @@ function weekJumpGo(){
   toast('已切到第 '+v+' 周'+(WK_VIEW?'（仅查看，不影响任务进度）':''));
 }
 
-/* 阶段达标测试：复用 buildMasteryTest，套一个本周虚空任务 */
-function weekOpenGate(){
-  const ws=weekState(), w=wkViewWeek(), wk=wkAt(w)||{};
-  const fake={ id:'W'+pad2(w), stage:wk.stage||'W'+pad2(w), stageName:wk.attr||'阶段', topicTag:(wk.review&&wk.review[0])||'综合',
-               calcTag:(wk.calc&&wk.calc[0]&&wk.calc[0].tag)||'mixed', type:'达标测试', calcCount:'6' };
-  MT=buildMasteryTest(fake);
-  MT._weekGateW=w;
-  openSheet(`第 ${w} 周 · 阶段达标测试`, `<div id="mtBox"></div>`);
-  renderMastery();
+/* ---------------- 阶段达标测试：AI 关键词出题（工作台不出题，家长拿关键词让 AI 出） ----------------
+   覆盖「上一个关卡周之后 ~ 本关卡周」的全部所学内容：主线、视频讲次、计算类型、回炉专题。
+   家长复制关键词去问 AI → AI 出题 → 孩子线下做 → 回来填达标率；≥80% 放行。 */
+function gateWeekRange(w){
+  const gates=Object.keys(WP.gateWeeks||{}).map(Number).sort((a,b)=>a-b);
+  let from=1;
+  gates.forEach(g=>{ if(g<w) from=g+1; });
+  return {from,to:w,weeks:WPW.filter(x=>x.w>=from&&x.w<=w)};
 }
-/* 提交达标测试时，如果带 _weekGateW，把结果写进 S.week.gate */
-const _origSubmitMastery=submitMastery;
-submitMastery=function(){
-  _origSubmitMastery();
-  if(MT&&MT._weekGateW&&MT.submitted){
-    const ws=weekState(), k='W'+pad2(MT._weekGateW);
-    ws.gate[k]={rate:MT.rate,passed:MT.passed,at:TODAY()};
-    if(MT.passed) ws.done[k+'/gate']=activeDate();
-    save(); renderWeek();
-  }
-};
+function gateAIKeyword(w){
+  const wk=wkAt(w)||{}, range=gateWeekRange(w);
+  const title=(WP.gateWeeks||{})[String(w)]||'阶段达标测试';
+  const stages=[...new Set(range.weeks.map(x=>x.stage))].join(' / ');
+  const mains=range.weeks.map(x=>`第${x.w}周：${x.main||''}`).filter(s=>s.indexOf('：')<s.length-1);
+  const vids=[]; range.weeks.forEach(x=>(x.videos||[]).filter(v=>!v.opt).forEach(v=>{ if(vids.indexOf(v.t)<0) vids.push(v.t); }));
+  const calcs=[]; range.weeks.forEach(x=>(x.calc||[]).forEach(c=>{ const n=calcName(c.tag); if(calcs.indexOf(n)<0) calcs.push(n); }));
+  const topics=[]; range.weeks.forEach(x=>(x.review||[]).forEach(t=>{ const n=String(t).replace(/（[^）]*）$/,''); if(topics.indexOf(n)<0) topics.push(n); }));
+  const kp=[]; topics.forEach(t=>{ const pts=D.keyPoints[t]; if(pts) pts.forEach(p=>{ if(kp.indexOf(p)<0) kp.push(p); }); });
+  let s=`【小学数学达标测试·出题任务】\n`;
+  s+=`请按下面列出的全部内容，出一套达标测试卷，检验孩子是否真正学懂（阶段：${stages}；关卡：${title}）。\n\n`;
+  s+=`一、考查范围（逐周主线）：\n${mains.map((m,i)=>`${i+1}. ${m}`).join('\n')}\n\n`;
+  if(vids.length) s+=`二、对应培优A讲次（按其知识点命题，不超纲）：\n${vids.map(v=>'· '+v).join('\n')}\n\n`;
+  if(calcs.length) s+=`三、计算类型（必考，给出梯度）：\n${calcs.map(c=>'· '+c).join('、')}\n\n`;
+  if(topics.length) s+=`四、应用题专题（覆盖每个）：\n${topics.map(t=>'· '+t).join('、')}\n`;
+  if(kp.length) s+=`　每个专题要考查的要点：\n${kp.slice(0,20).map(p=>'　- '+p).join('\n')}\n\n`;
+  s+=`五、试卷要求：\n`;
+  s+=`· 共 10 题：6 道计算（口算+笔算混合，含 2 道本周新学类型）+ 4 道应用题（每个专题至少 1 道）。\n`;
+  s+=`· 难度按课标内为主，可含 1–2 道本阶段易错/变式题，不要超纲到下一阶段。\n`;
+  s+=`· 每题附答案与简要过程；应用题先给题目，答案单独放最后。\n`;
+  s+=`· 我会把孩子的作答结果告诉你，请帮我按题号统计正确率并指出薄弱知识点。`;
+  return s;
+}
+function weekOpenGate(){
+  const ws=weekState(), w=wkViewWeek(), wk=wkAt(w)||{}, g=ws.gate[`W${pad2(w)}`];
+  const kw=gateAIKeyword(w);
+  openSheet(`第 ${w} 周 · 阶段达标测试`, `
+    <div class="card"><h3>${esc((WP.gateWeeks||{})[String(w)]||'阶段达标测试')}</h3>
+      <p class="hint">孩子学完这一整阶段的视频、要进入下一专题前做一次达标。工作台<b>不直接出题</b>：把下面这段关键词复制发给 AI，让 AI 出题打印给孩子线下做；做完把达标率填回来，≥80% 才放行进入下一专题。</p>
+      <div class="btn-row"><button class="btn" data-action="week-gate-copy">📋 复制 AI 出题关键词</button></div>
+      <textarea id="wgKey" rows="12" style="font-size:12px" readonly>${esc(kw)}</textarea>
+      <p class="hint">关键词已覆盖第 ${gateWeekRange(w).from}–${w} 周的全部主线、视频讲次、计算类型和回炉专题。</p>
+      <label class="lbl">孩子做完后的达标率（做对题数 ÷ 总题数）</label>
+      <div class="gate-rate"><input type="number" id="wgRight" min="0" placeholder="做对" ><span>/</span><input type="number" id="wgTotal" min="1" placeholder="总题数" value="10"><span class="gr-pct" id="wgPct">—</span></div>
+      <div class="btn-row"><button class="btn" data-action="week-gate-save">✓ 保存达标率</button></div>
+      ${g?`<p class="hint">最近一次：${g.rate}% · ${g.passed?'✅ 通过':'未过'} · ${esc(g.at)}</p>`:''}
+      <p class="hint">达到 80% 会自动放行到序列下一项；没过就把错的题补进错题本，过几天再测一次。</p>
+    </div>`);
+  const calc=()=>{ const r=parseInt($('#wgRight').value,10), t=parseInt($('#wgTotal').value,10);
+    const el=$('#wgPct'); if(el) el.textContent=(r>=0&&t>0)?Math.round(r/t*100)+'%':'—'; };
+  ['wgRight','wgTotal'].forEach(id=>{ const el=$('#'+id); if(el) el.addEventListener('input',calc); });
+}
+function calcGateRate(){ const r=parseInt($('#wgRight')&&$('#wgRight').value,10), t=parseInt($('#wgTotal')&&$('#wgTotal').value,10);
+  return (r>=0&&t>0)?Math.round(r/t*100):null; }
+function weekGateSave(){
+  const ws=weekState(), w=wkViewWeek(), rate=calcGateRate();
+  if(rate===null){ toast('请填做对题数和总题数'); return; }
+  const passed=rate>=80, k='W'+pad2(w);
+  ws.gate[k]={rate,passed,at:activeDate(),byParent:true,ai:true};
+  /* 没填错题就不自动建错题条目（线下题，家长自己决定要不要传） */
+  if(passed) ws.done[k+'/gate']=activeDate(); else delete ws.done[k+'/gate'];
+  save(); closeSheet(); renderAll();
+  toast(passed?`✅ 达标 ${rate}%，已放行到下一项`:`${rate}% 未达 80%，把错题传进错题本，过几天再测`);
+}
+async function weekGateCopy(){
+  const ta=$('#wgKey'); if(!ta) return;
+  try{ await navigator.clipboard.writeText(ta.value); toast('✓ 关键词已复制，去发给 AI 出题'); }
+  catch(e){ ta.select(); try{ document.execCommand('copy'); toast('✓ 已复制'); }catch(_){ toast('请长按文本框手动复制'); } }
+}
+
+/* ---------------- 强制清缓存（版本号卡住时用，不动用户数据） ---------------- */
+async function clearCacheAndReload(){
+  try{
+    if('serviceWorker' in navigator && navigator.serviceWorker.getRegistrations){
+      const regs=await navigator.serviceWorker.getRegistrations();
+      for(const r of regs){ try{ await r.unregister(); }catch(e){} }
+    }
+  }catch(e){}
+  try{
+    if(window.caches && caches.keys){
+      const ks=await caches.keys();
+      for(const k of ks){ try{ await caches.delete(k); }catch(e){} }
+    }
+  }catch(e){}
+  /* localStorage（进度/错题/照片索引）一律不动 */
+  const base=String(location.href||'').split('?')[0].split('#')[0];
+  location.href=base+'?_bust='+Date.now();
+}
 
 /* ---------------- 启动 ---------------- */
 if('serviceWorker' in navigator && /^https?:/.test(location.protocol)){
-  navigator.serviceWorker.register('sw.js').catch(()=>{});
+  navigator.serviceWorker.register('sw.js').then(reg=>{ if(reg&&reg.update) reg.update().catch(()=>{}); }).catch(()=>{});
 }
 boot();
 })();
