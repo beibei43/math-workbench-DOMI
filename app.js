@@ -6,7 +6,7 @@
 const $  = s => document.querySelector(s);
 const $$ = s => Array.prototype.slice.call(document.querySelectorAll(s));
 const D  = window.APP_DATA;
-const APP_VER = 'v22';   /* 界面上可见的版本号：更新后数字变了，说明新文件已生效 */
+const APP_VER = 'v23';   /* 界面上可见的版本号：更新后数字变了，说明新文件已生效 */
 const GUIDE = window.TOPIC_GUIDE || {};
 const CALC = window.CALC_GUIDE || {};
 const TASKS = D.tasks;
@@ -977,32 +977,104 @@ function renderTasks(){
   });
   $('#taskList').innerHTML=html||'<div class="card"><p class="hint">没有符合条件的任务。</p></div>';
 }
-/* 任务页交互：打钩当前项 / 看任务详情 */
+/* 任务页交互：已完成项＝预览（不直接改）；当前项＝确认后才打钩推进 */
 function wpToggleTask(no){
   const ws=weekState(), t=WPTASKS.find(x=>x.no===no); if(!t) return;
-  if(wpTaskDone(t,ws)){
-    if(t.kind==='video'){ delete ws.done[t.key]; WK_VIEW=null; save(); renderAll(); toast('已取消第 '+wpSeq(no)+' 项的打钩'); }
-    else toast('阶段测试成绩保留；要重测请到「本周」页');
-    return;
-  }
+  if(wpTaskDone(t,ws)){ wpOpenTask(no); return; }   /* 已完成：只预览，撤销要在详情里单独确认 */
   const cursor=wpCursor(ws);
   if((no-1)!==cursor){ toast('请先完成第 '+wpSeq(cursor+1)+' 项：'+((WPTASKS[cursor]||{}).title||'')); return; }
-  if(t.kind==='video'){ weekVideoToggle(no); return; }
-  WK_VIEW=t.w; weekOpenGate();
+  if(t.kind==='video'){ wpConfirmDone(no); return; }
+  WK_VIEW=t.w; weekOpenGate();   /* 阶段测：去填达标率 */
 }
+/* 打钩前先给家长看清楚是哪一项，避免「只想测试」就推进 */
+function wpConfirmDone(no){
+  const ws=weekState(), t=WPTASKS.find(x=>x.no===no); if(!t) return;
+  if(wpTaskDone(t,ws)){ wpOpenTask(no); return; }
+  const cursor=wpCursor(ws);
+  if((no-1)!==cursor){ toast('请先完成第 '+wpSeq(cursor+1)+' 项：'+((WPTASKS[cursor]||{}).title||'')); return; }
+  const wk=wkAt(t.w)||{};
+  openSheet('确认完成第 '+wpSeq(no)+' 项？', `<div class="card">
+    <p class="hint"><b>点确认才会打钩并推进到下一项</b>；只是想看看的话点「取消」，进度不会变。</p>
+    <h3>${esc(t.title)}</h3>
+    <p class="hint">${esc(t.stage)} · 第 ${t.w} 周 · ${t.kind==='gate'?'阶段达标测试':'培优A视频'}</p>
+    ${wk.main?`<p class="hint">本周主线：${esc(wk.main)}</p>`:''}
+    <div class="btn-row"><button class="btn" data-action="wp-done-yes" data-no="${no}">✓ 确认完成，进入下一项</button>
+      <button class="btn ghost" data-action="close-sheet">取消，不改进度</button></div>
+  </div>`);
+}
+/* 真正确认打钩：只有这里写 ws.done */
+function wpDoneYes(no){
+  const ws=weekState(), t=WPTASKS.find(x=>x.no===no); if(!t) return;
+  if(wpTaskDone(t,ws)){ closeSheet(); return; }
+  const cursor=wpCursor(ws);
+  if((no-1)!==cursor){ closeSheet(); toast('这一项还不是当前任务，未改动'); return; }
+  if(t.kind==='video') ws.done[t.key]=activeDate();
+  else { if(!ws.gate) ws.gate={}; ws.gate[`W${pad2(t.w)}`]={rate:100,passed:true,at:TODAY(),byParent:true}; ws.done[t.key]=activeDate(); }
+  WK_VIEW=null; save(); closeSheet(); renderAll();
+  const nt=wpCurTask();
+  toast('✓ 第 '+wpSeq(no)+' 项完成'+(nt?('，下一项：第 '+wpSeq(nt.no)+' 项'):''));
+}
+function wpDoneRaw(t,ws){
+  if(t.kind==='video') return ws.done[t.key];
+  const g=ws.gate&&ws.gate[`W${pad2(t.w)}`];
+  return (g&&g.at)||ws.done[t.key];
+}
+/* 任务详情：这里是「预览」，点开不会改任何进度；撤销要单独确认 */
 function wpOpenTask(no){
   const t=WPTASKS.find(x=>x.no===no); if(!t) return;
   const ws=weekState(), wk=wkAt(t.w)||{}, d=wpTaskDone(t,ws), isCur=((no-1)===wpCursor(ws));
+  const raw=wpDoneRaw(t,ws);
   openSheet('第 '+wpSeq(no)+' 项 · '+(t.kind==='gate'?'阶段测试':'视频'), `<div class="card">
     <p class="hint">${esc(t.stage)} · 第 ${t.w} 周 · 计划 ${esc(wk.start||'')} ~ ${esc(wk.end||'')}</p>
     <h3>${esc(t.title)}</h3>
     <p class="hint">本周主线：${esc(t.main||'')}</p>
     <p class="hint">本周计算：${(wk.calc||[]).map(c=>esc(calcName(c.tag))+' '+c.n+' 题').join('、')||'按每日保温'}</p>
     ${wk.backup?`<p class="hint">校内兜底：${esc(wk.backup)}</p>`:''}
-    <p class="hint">状态：${d?'✓ 已完成':(isCur?'▶ 当前这项':'未完成（前面的项还没打钩）')}</p>
-    <div class="btn-row"><button class="btn" data-action="wp-toggle" data-no="${no}">${d?(t.kind==='video'?'取消打钩':'已通过'):'开始 / 打钩'}</button>
-      <button class="btn ghost" data-action="wp-view-week" data-v="${t.w}">看这一周执行表</button></div>
+    <p class="hint">状态：${d?('✓ 已于 '+esc(String(raw||'').slice(0,16))+' 完成'):(isCur?'▶ 当前这项':'未完成（前面的项还没打钩）')}</p>
+    <div class="btn-row">
+      ${d?`<button class="btn ghost danger" data-action="wp-undo" data-no="${no}">撤销这一项的打钩</button>`
+        :(isCur?`<button class="btn" data-action="wp-toggle" data-no="${no}">打钩完成</button>`:'')}
+      <button class="btn ghost" data-action="wp-view-week" data-v="${t.w}">看这一周执行表</button>
+      <button class="btn ghost" data-action="done-list">← 已完成清单</button></div>
   </div>`);
+}
+/* 已完成清单：家长预览 / 撤销已打钩的主任务 */
+function openDoneList(){
+  const ws=weekState();
+  const done=WPTASKS.filter(t=>wpTaskDone(t,ws));
+  if(!done.length){ toast('还没有已完成的主任务'); return; }
+  openSheet('已完成的任务 · '+done.length+' 项', `<div class="card">
+    <p class="hint">下面都是已打钩的主任务。<b>预览</b>只是看详情，不会改动进度；<b>撤销</b>会取消打钩，当前任务回到这一项、后面的重新锁住。撤销只改完成记录，错题和计算记录都保留。</p>
+    <div class="done-list">${done.slice().reverse().map(t=>{
+      const raw=wpDoneRaw(t,ws);
+      return `<div class="done-item">
+        <div class="done-main"><b>${wpSeq(t.no)}</b><span class="wk-pill ${t.kind==='gate'?'alt':''}">${t.kind==='gate'?'阶段测':'视频'}</span> ${esc(t.title)}
+          <small>第 ${t.w} 周 · ${esc(String(raw||'').slice(0,16))} 完成</small></div>
+        <div class="done-btns"><button class="btn tiny ghost" data-action="wp-preview" data-no="${t.no}">预览</button>
+          <button class="btn tiny ghost danger" data-action="wp-undo" data-no="${t.no}">撤销</button></div>
+      </div>`;
+    }).join('')}</div>
+    <div class="btn-row"><button class="btn ghost" data-action="close-sheet">关闭</button></div>
+  </div>`);
+}
+function wpUndoTask(no){
+  const t=WPTASKS.find(x=>x.no===no); if(!t) return;
+  const ws=weekState(), raw=wpDoneRaw(t,ws);
+  openSheet('撤销第 '+wpSeq(no)+' 项的完成？', `<div class="card">
+    <h3>${esc(t.title)}</h3>
+    <p class="hint">第 ${t.w} 周 · ${esc(t.stage)} · ${esc(String(raw||'').slice(0,16))} 完成</p>
+    <p class="hint">撤销后当前任务回到第 ${wpSeq(no)} 项，后面各项重新锁住。<b>错题、每日计算、达标率记录都不受影响</b>——只是家长在改完成标记，孩子学过的内容不会消失。</p>
+    <div class="btn-row"><button class="btn ghost danger" data-action="wp-undo-yes" data-no="${no}">✓ 确认撤销</button>
+      <button class="btn ghost" data-action="done-list">返回，不改</button></div>
+  </div>`);
+}
+function wpUndoYes(no){
+  const ws=weekState(), t=WPTASKS.find(x=>x.no===no); if(!t) return;
+  if(t.kind==='video') delete ws.done[t.key];
+  else { delete ws.done[t.key]; if(ws.gate) delete ws.gate[`W${pad2(t.w)}`]; }
+  WK_VIEW=null; save(); renderAll();
+  toast('已撤销第 '+wpSeq(no)+' 项，当前任务回到这一项');
+  openDoneList();
 }
 function wpViewWeek(v){
   v=parseInt(v,10); if(!(v>=1&&v<=WPW.length)) return;
@@ -2582,6 +2654,12 @@ document.addEventListener('click',e=>{
     case 'wp-toggle': wpToggleTask(parseInt(el.dataset.no,10)); break;
     case 'wp-task': wpOpenTask(parseInt(el.dataset.no,10)); break;
     case 'wp-view-week': wpViewWeek(el.dataset.v); break;
+    /* v23 打钩确认 / 已完成预览与撤销 */
+    case 'wp-done-yes': wpDoneYes(parseInt(el.dataset.no,10)); break;
+    case 'wp-preview': wpOpenTask(parseInt(el.dataset.no,10)); break;
+    case 'wp-undo': wpUndoTask(parseInt(el.dataset.no,10)); break;
+    case 'wp-undo-yes': wpUndoYes(parseInt(el.dataset.no,10)); break;
+    case 'done-list': openDoneList(); break;
     case 'clear-cache': clearCacheAndReload(); break;
     case 'open-wrong-browse': openWrongBrowse(); break;
     case 'wrong-browse': openWrongBrowse(); break;
@@ -2936,11 +3014,15 @@ function renderWeek(){
   const strong=fc.etaDrift>14?'落后':(fc.etaDrift<-14?'领先':'正常');
 
   /* 当前任务（全局序号）。落后就停在这项，不会跳到日历上「今天该做」的那项 */
+  const doneN=WPTASKS.filter(t=>wpTaskDone(t,ws)).length;
   let html=`<div class="wk-cur">
     <div class="wkc-main"><span class="wkc-tag">当前任务 · 第 ${ct?wpSeq(ct.no)+' / '+WPTASKS.length:'✓'} 项</span>
       <b>${ct?esc(ct.title):'执行表主任务已全部完成，可进入初中衔接'}</b>
       <small>${ct?`第 ${ct.w} 周 · ${esc(ct.stage)} · ${ct.kind==='gate'?'阶段达标测试':'培优A视频'}`:''}</small></div>
-    ${ct?`<button class="btn tiny ghost" data-action="week-unlock">家长确认已完成</button>`:''}
+    <div class="wkc-acts">
+      ${doneN?`<button class="btn tiny ghost" data-action="done-list">已完成 ${doneN} 项 · 查看/撤销</button>`:''}
+      ${ct?`<button class="btn tiny ghost" data-action="week-unlock">家长确认已完成</button>`:''}
+    </div>
   </div>`;
   if(WK_VIEW && w!==wpCurWeek()) html+=`<div class="wk-viewnote">正在查看第 ${w} 周（不影响任务进度）<button class="btn tiny ghost" data-action="week-cur">回到当前任务 ${ct?wpSeq(ct.no):''} ›</button></div>`;
 
@@ -2959,7 +3041,7 @@ function renderWeek(){
     </div>
   </div>`;
 
-  const wd=WPTASKS.filter(t=>wpTaskDone(t,ws)).length;
+  const wd=doneN;
   html+=`<div class="wk-bar"><div class="wk-bar-in" style="width:${Math.round(wd/WPTASKS.length*100)}%"></div></div>
     <div class="wk-bar-note">主任务 ${wd}/${WPTASKS.length} 项完成 · 当前第 ${ct?wpSeq(ct.no):'—'} 项 · ${strong==='落后'?'⚠ 落后较多，建议压缩选做奥数周、利用假期补回':(strong==='领先'?'✅ 领先计划，可按节奏放缓或提前启动初中预热':'节奏正常，按序号推进即可')}</div>`;
 
@@ -3053,15 +3135,10 @@ function weekStepBody(w,st,unlocked,done){
 
 /* ---------- 本周打卡交互 ---------- */
 function weekVideoToggle(no){
-  const ws=weekState(), cursor=wpCursor(ws);
   const t=WPTASKS.find(x=>x.no===no&&x.kind==='video');
   if(!t) return;
-  if(ws.done[t.key]){ delete ws.done[t.key]; WK_VIEW=null; save(); renderAll();
-    toast('已取消第 '+wpSeq(no)+' 项的打钩，当前任务回到这一项'); return; }
-  if((no-1)!==cursor){ toast('请先完成第 '+wpSeq(cursor+1)+' 项：'+((WPTASKS[cursor]||{}).title||'')); return; }
-  ws.done[t.key]=activeDate(); WK_VIEW=null; save(); renderAll();
-  const nt=wpCurTask();
-  toast(nt?`✓ 第 ${wpSeq(no)} 项完成，下一项：第 ${wpSeq(nt.no)} 项`:'✓ 全部主任务已完成');
+  if(wpTaskDone(t,weekState())){ wpOpenTask(no); return; }   /* 已完成：预览，不直接改 */
+  wpConfirmDone(no);   /* 当前项：先确认，避免误触推进 */
 }
 function weekVideoNone(){
   const ws=weekState(), w=wkViewWeek(), wk=wkAt(w)||{}, vids=(wk.videos||[]).filter(v=>!v.opt);
@@ -3266,13 +3343,10 @@ function weekViewShift(d){
 }
 function weekViewCur(){ WK_VIEW=null; renderAll(); }
 function weekUnlock(){
-  const ws=weekState(), t=wpCurTask();
+  const t=wpCurTask();
   if(!t){ closeSheet(); toast('主任务已全部完成'); return; }
-  if(t.kind==='video') ws.done[t.key]=activeDate();
-  else { if(!ws.gate) ws.gate={}; ws.gate[`W${pad2(t.w)}`]={rate:100,passed:true,at:TODAY(),byParent:true}; ws.done[t.key]=activeDate(); }
-  WK_VIEW=null; save(); closeSheet(); renderAll();
-  const nt=wpCurTask();
-  toast('✓ 家长确认第 '+wpSeq(t.no)+' 项已完成'+(nt?('，下一项：第 '+wpSeq(nt.no)+' 项'):''));
+  if(t.kind==='gate'){ WK_VIEW=t.w; weekOpenGate(); return; }   /* 阶段测去填达标率，不直接放行 */
+  wpConfirmDone(t.no);   /* 和其他打钩入口一样，先确认再推进 */
 }
 function weekJump(){
   const ct=wpCurTask(), cw=wpCurWeek();

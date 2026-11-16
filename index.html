@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon.svg">
-<link rel="stylesheet" href="styles.css?v22">
+<link rel="stylesheet" href="styles.css?v23">
 </head>
 <body>
 
@@ -23,7 +23,7 @@
 
   <!-- ========== 本周打卡（v20 默认页 · 94 周主线 · 串行推送 + 计划/实际偏离） ========== -->
   <section class="page active" id="page-week">
-    <div class="page-head"><h2>本周打卡 · 94 周执行表</h2><p><b>这是给家长记录用的工作台</b>，孩子不在这里做题。本周固定四项：① 本周视频（按执行表序号推进，前一项没打钩后面全锁住，落下就停原地不跳周）② 每日计算（线下买题做，只记录内容+打钩，不出题不判分）③ 回炉专题（每周一个，做当时的错题，不看视频）④ 周末错题上传（单题拍照或整份文件，自动按专题编号）。四类互不锁，先做哪个都行；周末还会按 1/3/7 天提醒要复习的旧错题。打钩时间单独记录算偏离。</p></div>
+    <div class="page-head"><h2>本周打卡 · 94 周执行表</h2><p><b>这是给家长记录用的工作台</b>，孩子不在这里做题。本周固定四项：① 本周视频（按执行表序号推进，前一项没打钩后面全锁住，落下就停原地不跳周）② 每日计算（线下买题做，只记录内容+打钩，不出题不判分）③ 回炉专题（每周一个，做当时的错题，不看视频）④ 周末错题上传（单题拍照或整份文件，自动按专题编号）。四类互不锁，先做哪个都行；周末还会按 1/3/7 天提醒要复习的旧错题。<b>打钩前会先弹确认，误点「取消」进度不变；已完成的任务可在顶部「已完成 N 项 · 查看/撤销」里预览或撤销。</b></p></div>
     <div id="weekRoot"></div>
   </section>
 
@@ -87,7 +87,7 @@
 
   <!-- ========== 任务序列 ========== -->
   <section class="page" id="page-tasks">
-    <div class="page-head"><h2>任务序列 · 执行表 01 → N</h2><p>整份执行表的主任务按序号排列（视频 + 阶段测）。前一项没完成，后面全部锁住；落下就停在原地继续那一项，不按日历跳。点任务看详情、打钩或跳到那一周。</p></div>
+    <div class="page-head"><h2>任务序列 · 执行表 01 → N</h2><p>整份执行表的主任务按序号排列（视频 + 阶段测）。前一项没完成，后面全部锁住；落下就停在原地继续那一项，不按日历跳。<b>点已完成的任务=预览详情（不改进度）；要打钩会先弹确认；撤销需单独确认。</b></p></div>
     <div class="card day-entry">
       <h3>📅 按日期回看 / 补录</h3>
       <p class="hint">昨天漏记的题、周一做过的任务、想提前看某天的安排，点这里打开；补录的内容会自动记到那一天。</p>
@@ -280,15 +280,15 @@
 <div class="toast hidden" id="toast"></div>
 <div id="printArea"></div>
 
-<script src="data.js?v22"></script>
-<script src="weekplan.js?v22"></script>
-<script src="path.js?v22"></script>
-<script src="topics.js?v22"></script>
-<script src="calcguide.js?v22"></script>
-<script src="classify.js?v22"></script>
-<script src="variants.js?v22"></script>
-<script src="calendar.js?v22"></script>
-<script src="sync.js?v22"></script>
-<script src="app.js?v22"></script>
+<script src="data.js?v23"></script>
+<script src="weekplan.js?v23"></script>
+<script src="path.js?v23"></script>
+<script src="topics.js?v23"></script>
+<script src="calcguide.js?v23"></script>
+<script src="classify.js?v23"></script>
+<script src="variants.js?v23"></script>
+<script src="calendar.js?v23"></script>
+<script src="sync.js?v23"></script>
+<script src="app.js?v23"></script>
 </body>
 </html>

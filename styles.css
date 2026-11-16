@@ -820,3 +820,18 @@ a.btn.as-link{display:inline-block;text-decoration:none;flex:0 0 auto}
 .gate-rate .gr-pct{font-size:18px;font-weight:700;color:var(--teal);min-width:52px}
 #wgKey{width:100%;resize:vertical;font-family:inherit;line-height:1.6;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--bg);color:var(--ink);margin:8px 0}
 @media(max-width:560px){.wm-item{align-items:flex-start}.wm-btns{width:100%}}
+
+/* ===== v23 · 打钩二次确认 / 已完成任务预览与撤销 ===== */
+.wkc-acts{display:flex;flex-direction:column;gap:6px;align-items:stretch;flex:0 0 auto}
+.wkc-acts .btn{white-space:nowrap}
+.btn.danger{color:#b83227;border-color:#e3b4ad}
+.btn.ghost.danger{background:transparent}
+.done-list{max-height:56vh;overflow:auto;border-top:1px dashed var(--line);margin-top:10px}
+.done-item{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 2px;border-bottom:1px dashed var(--line)}
+.done-item:last-child{border-bottom:0}
+.done-main{flex:1 1 240px;min-width:0;font-size:13px;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
+.done-main b{color:var(--teal);margin-right:6px}
+.done-main .wk-pill{margin-right:6px}
+.done-main small{display:block;color:var(--faint);font-size:11px;margin-top:2px}
+.done-btns{display:flex;gap:6px;flex:0 0 auto}
+@media(max-width:560px){.wkc-acts{width:100%;flex-direction:row;flex-wrap:wrap}.wkc-acts .btn{flex:1 1 120px}.done-btns{width:100%}}
