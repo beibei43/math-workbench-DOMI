@@ -6,7 +6,7 @@
 const $  = s => document.querySelector(s);
 const $$ = s => Array.prototype.slice.call(document.querySelectorAll(s));
 const D  = window.APP_DATA;
-const APP_VER = 'v20';   /* 界面上可见的版本号：更新后数字变了，说明新文件已生效 */
+const APP_VER = 'v21';   /* 界面上可见的版本号：更新后数字变了，说明新文件已生效 */
 const GUIDE = window.TOPIC_GUIDE || {};
 const CALC = window.CALC_GUIDE || {};
 const TASKS = D.tasks;
@@ -779,26 +779,26 @@ function renderPath(){
 }
 
 function renderHome(){
-  const total=TASKS.length, done=Object.keys(S.completed).length;
+  const ws=weekState(), total=WPTASKS.length, done=WPTASKS.filter(t=>wpTaskDone(t,ws)).length;
   const rate=total?Math.round(done/total*100):0;
-  const cur=currentTask();
-  $('#stCurrent').textContent=cur?cur.id:'全部完成';
+  const cur=currentTask(), ct=wpCurTask();
+  $('#stCurrent').textContent=ct?wpSeq(ct.no):'全部完成';
   $('#stDone').textContent=`${done} / ${total}`;
   $('#stRate').textContent=rate+'%';
   $('#stWrong').textContent=activeMistakes().length;
   $('#progressBar').style.width=rate+'%';
   if(!$('#page-week')||!$('#page-week').classList.contains('active'))
-    $('#topStage').textContent=cur?`${cur.stage} · ${cur.stageName}`:'全部任务已完成';
+    $('#topStage').textContent=ct?`第 ${ct.w}/94 周 · 当前第 ${wpSeq(ct.no)} 项`:'全部任务已完成';
   const due=dueMistakes().length;
   $('#reviewBanner').classList.toggle('hidden',due===0);
   $('#reviewCount').textContent=due+' 题';
   $('#wrongBadge').classList.toggle('hidden',due===0);
   $('#wrongBadge').textContent=due;
-  $('#quickOverview').textContent=`${new Set(TASKS.map(t=>t.stage)).size} 个阶段 · ${total} 个任务`;
+  $('#quickOverview').textContent=`${WPSTAGES.length} 个阶段 · ${WPW.length} 周 · ${total} 项主任务`;
   $('#quickWrong').textContent=`${activeMistakes().length} 题 · 可浏览 / 重做`;
   /* 统计栏始终显示「当前任务」；下面这张卡按家长选中的日期显示那天安排的任务 */
   const view=taskForDate(activeDate())||cur;
-  $('#currentTask').innerHTML=view ? dailyPanelHTML(view) : '<div class="card"><h3>🎉 82 个任务全部完成</h3><p class="hint">可到「任务」页回看，或在「设置」里导出备份。</p></div>';
+  $('#currentTask').innerHTML=view ? dailyPanelHTML(view) : `<div class="card"><h3>🎉 ${total} 项主任务全部完成</h3><p class="hint">可到「任务」页回看，或在「设置」里导出备份。</p></div>`;
 }
 /* ---------------- 今日学习面板（首页核心） ---------------- */
 function prog(id){ if(!S.progress) S.progress={}; return S.progress[id]||(S.progress[id]={start:null,end:null,daily:[],passed:false}); }
@@ -942,75 +942,114 @@ function dailyPanelHTML(t){
   ${dayDetailHTML(d0,t)}`;
 }
 
-/* ---------------- 渲染：任务序列 ---------------- */
+/* ---------------- 渲染：任务序列（v21 · 94 周执行表全局序号） ---------------- */
 function renderTasks(){
   const sf=$('#taskStageFilter').value, tf=$('#taskStateFilter').value;
-  const stages=[...new Set(TASKS.map(t=>t.stage))];
-  if($('#taskStageFilter').options.length===1) stages.forEach(s=>$('#taskStageFilter').add(new Option(s+' · '+TASKS.find(t=>t.stage===s).stageName,s)));
-  const cur=currentTask();
-  let html='';
-  stages.forEach(st=>{
+  const sel=$('#taskStageFilter');
+  if(sel.options.length===1) WPSTAGES.forEach(s=>{
+    const a=WPW.filter(w=>w.stage===s);
+    sel.add(new Option(s+'（第 '+a[0].w+'–'+a[a.length-1].w+' 周）',s));
+  });
+  const ws=weekState(), cursor=wpCursor(ws);
+  const nV=WPTASKS.filter(t=>t.kind==='video').length, nG=WPTASKS.length-nV;
+  let html=`<div class="card wptip"><p class="hint">执行表主任务共 <b>${WPTASKS.length}</b> 项（${nV} 个视频 + ${nG} 次阶段测），按序号 <b>01 → ${wpSeq(WPTASKS.length)}</b> 推进：<b>前一项没打钩，后面全部锁住</b>。落下就停在原地继续那一项，不会随日历跳过去。当天的计算 / 错题随时做，不排先后。</p></div>`;
+  WPSTAGES.forEach(st=>{
     if(sf&&sf!==st) return;
-    const list=TASKS.filter(t=>t.stage===st&&(!tf||(tf==='done'?!!S.completed[t.id]:!S.completed[t.id])));
+    const all=WPTASKS.filter(t=>t.stage===st);
+    const list=all.filter(t=>!tf||(tf==='done'?wpTaskDone(t,ws):!wpTaskDone(t,ws)));
     if(!list.length) return;
-    const dn=list.filter(t=>S.completed[t.id]).length;
-    html+=`<div class="stage-head">${esc(st)} · ${esc(list[0].stageName)}<small>${dn}/${TASKS.filter(t=>t.stage===st).length} 已完成</small></div>`;
+    const dn=all.filter(t=>wpTaskDone(t,ws)).length;
+    const wks=WPW.filter(w=>w.stage===st);
+    html+=`<div class="stage-head">${esc(st)}<small>第 ${wks[0].w}–${wks[wks.length-1].w} 周 ｜ ${dn}/${all.length} 已完成</small></div>`;
     list.forEach(t=>{
-      const done=!!S.completed[t.id];
-      html+=`<div class="task-item ${done?'is-done':''} ${cur&&cur.id===t.id?'is-current':''}" data-action="open-task" data-id="${t.id}">
-        <button class="tick" data-action="toggle-done" data-id="${t.id}" aria-label="完成">✓</button>
-        <div class="body"><b>${esc(t.id)}</b>${typePill(t)}${modeMini(t)}
-          <p class="ti-calc">计算：${esc(calcName(t.calcTag))}${calcIsNew(t)?' · 新学':' · 保温'} ｜ ${esc(t.calcText)}</p>
-          <p>专题：${esc(t.topic)}</p></div>
-        <div class="meta">${done?esc(S.completed[t.id].at.slice(5)):'未完成'}</div>
+      const d=wpTaskDone(t,ws), isCur=(t.no-1===cursor), lock=(t.no-1>cursor&&!d);
+      const raw=t.kind==='video'?ws.done[t.key]:((ws.gate&&ws.gate[`W${pad2(t.w)}`]&&ws.gate[`W${pad2(t.w)}`].at)||ws.done[t.key]);
+      html+=`<div class="task-item ${d?'is-done':''} ${isCur?'is-current':''} ${lock?'is-locked':''}" data-action="wp-task" data-no="${t.no}">
+        <button class="tick" data-action="wp-toggle" data-no="${t.no}" ${lock?'disabled':''}>${d?'✓':(isCur?'▶':(lock?'🔒':'○'))}</button>
+        <div class="body"><b>${wpSeq(t.no)}</b><span class="wk-pill ${t.kind==='gate'?'alt':''}">${t.kind==='gate'?'阶段测':'视频'}</span>
+          <p>${esc(t.title)}</p>
+          <p class="ti-calc">第 ${t.w} 周 · ${esc(t.main||'').slice(0,52)}</p></div>
+        <div class="meta">${d?esc(String(raw||'').slice(5)):(isCur?'当前':(lock?'未解锁':''))}</div>
       </div>`;
     });
   });
   $('#taskList').innerHTML=html||'<div class="card"><p class="hint">没有符合条件的任务。</p></div>';
 }
+/* 任务页交互：打钩当前项 / 看任务详情 */
+function wpToggleTask(no){
+  const ws=weekState(), t=WPTASKS.find(x=>x.no===no); if(!t) return;
+  if(wpTaskDone(t,ws)){
+    if(t.kind==='video'){ delete ws.done[t.key]; WK_VIEW=null; save(); renderAll(); toast('已取消第 '+wpSeq(no)+' 项的打钩'); }
+    else toast('阶段测试成绩保留；要重测请到「本周」页');
+    return;
+  }
+  const cursor=wpCursor(ws);
+  if((no-1)!==cursor){ toast('请先完成第 '+wpSeq(cursor+1)+' 项：'+((WPTASKS[cursor]||{}).title||'')); return; }
+  if(t.kind==='video'){ weekVideoToggle(no); return; }
+  WK_VIEW=t.w; weekOpenGate();
+}
+function wpOpenTask(no){
+  const t=WPTASKS.find(x=>x.no===no); if(!t) return;
+  const ws=weekState(), wk=wkAt(t.w)||{}, d=wpTaskDone(t,ws), isCur=((no-1)===wpCursor(ws));
+  openSheet('第 '+wpSeq(no)+' 项 · '+(t.kind==='gate'?'阶段测试':'视频'), `<div class="card">
+    <p class="hint">${esc(t.stage)} · 第 ${t.w} 周 · 计划 ${esc(wk.start||'')} ~ ${esc(wk.end||'')}</p>
+    <h3>${esc(t.title)}</h3>
+    <p class="hint">本周主线：${esc(t.main||'')}</p>
+    <p class="hint">本周计算：${(wk.calc||[]).map(c=>esc(calcName(c.tag))+' '+c.n+' 题').join('、')||'按每日保温'}</p>
+    ${wk.backup?`<p class="hint">校内兜底：${esc(wk.backup)}</p>`:''}
+    <p class="hint">状态：${d?'✓ 已完成':(isCur?'▶ 当前这项':'未完成（前面的项还没打钩）')}</p>
+    <div class="btn-row"><button class="btn" data-action="wp-toggle" data-no="${no}">${d?(t.kind==='video'?'取消打钩':'已通过'):'开始 / 打钩'}</button>
+      <button class="btn ghost" data-action="wp-view-week" data-v="${t.w}">看这一周执行表</button></div>
+  </div>`);
+}
+function wpViewWeek(v){
+  v=parseInt(v,10); if(!(v>=1&&v<=WPW.length)) return;
+  WK_VIEW=(v===wpCurWeek())?null:v; closeSheet();
+  if(activePage()!=='week'){ NAV.page=['week']; applyPage('week'); }
+  renderAll();
+}
 
 /* ---------------- 渲染：阶段总览（每阶段多少任务、分别是什么） ---------------- */
 const STAGES=[...new Set(TASKS.map(t=>t.stage))];
-/* 计算知识地图：按 82 个任务里首次出现的顺序列出全部计算知识点，点开看讲解 */
+/* 计算知识地图：按 94 周执行表第一次出现的顺序列出，点开看讲解 */
 function renderCalcMap(){
   const el=$('#calcMap'); if(!el) return;
-  const order=[...new Set(TASKS.map(t=>t.calcTag))];
-  el.innerHTML=`<div class="card"><h3>📐 计算知识点学习地图</h3>
-    <p class="hint">计算和专题一样要「先学再练」。下面是计算知识点在任务序列里第一次出现的顺序，点任一个可看步骤、例题与易错点；标「新学」的是孩子第一次遇到，之后的任务是保温复习。</p>
-    <p class="hint">每个任务卡片顶部都标了「看视频 / 家长教 / 直接练」和要看哪一节。想一次看全顺序，打开完整执行表：</p>
+  const order=[];
+  WPW.forEach(w=>(w.calc||[]).forEach(c=>{ if(order.indexOf(c.tag)<0) order.push(c.tag); }));
+  el.innerHTML=`<div class="card"><h3>📐 计算知识点学习地图（94 周执行表顺序）</h3>
+    <p class="hint">计算和专题一样要「先学再练」。下面是执行表里计算知识点第一次出现的周次，点任一个可看步骤、例题与易错点。</p>
     <div class="btn-row"><a class="btn small ghost as-link" href="study-plan.html" target="_blank" rel="noopener">打开完整执行表：顺序 / 看哪节视频 / 怎么学</a></div>
     <div class="chip-row">${order.map((tag,i)=>{
-      const first=TASKS.find(t=>t.calcTag===tag);
-      const isNew=!!first&&calcIsNew(first);
-      return `<button class="chip" data-action="calc-guide" data-id="${esc(tag)}">${i+1}. ${esc(calcName(tag))}<small>${esc(first?first.id:'')}${isNew?' · 新学':' · 保温'}</small> ›</button>`;
+      const w=WPW.find(w=>(w.calc||[]).some(c=>c.tag===tag));
+      return `<button class="chip" data-action="calc-guide" data-id="${esc(tag)}">${i+1}. ${esc(calcName(tag))}<small>第 ${w?w.w:'—'} 周</small> ›</button>`;
     }).join('')}</div></div>`;
 }
 function renderOverview(){
-  const cur=currentTask(), total=TASKS.length, done=Object.keys(S.completed).length;
-  $('#overviewSummary').innerHTML=`<span>阶段 <b>${STAGES.length}</b></span><span>任务 <b>${total}</b></span><span>已完成 <b>${done}</b></span><span>完成率 <b>${total?Math.round(done/total*100):0}%</b></span>`;
+  const ws=weekState(), cursor=wpCursor(ws), cw=wpCurWeek();
+  const total=WPTASKS.length, done=WPTASKS.filter(t=>wpTaskDone(t,ws)).length;
+  $('#overviewSummary').innerHTML=`<span>阶段 <b>${WPSTAGES.length}</b></span><span>周 <b>${WPW.length}</b></span><span>主任务 <b>${total}</b></span><span>已完成 <b>${done}</b></span><span>完成率 <b>${total?Math.round(done/total*100):0}%</b></span>`;
   renderCalcMap();
-  $('#overviewList').innerHTML=STAGES.map(st=>{
-    const list=TASKS.filter(t=>t.stage===st), dn=list.filter(t=>S.completed[t.id]).length;
-    const pct=Math.round(dn/list.length*100), isCur=!!(cur&&cur.stage===st);
-    const newCalcs=[...new Set(list.filter(t=>calcIsNew(t)).map(t=>calcName(t.calcTag)))];
+  $('#overviewList').innerHTML=WPSTAGES.map(st=>{
+    const weeks=WPW.filter(w=>w.stage===st), tasks=WPTASKS.filter(t=>t.stage===st);
+    const dn=tasks.filter(t=>wpTaskDone(t,ws)).length;
+    const pct=tasks.length?Math.round(dn/tasks.length*100):0;
+    const isCur=weeks.some(w=>w.w===cw);
     return `<div class="ov-card ${isCur?'is-current':''}" data-stage="${esc(st)}">
       <div class="ov-head" data-action="toggle-stage" data-id="${esc(st)}">
-        <div class="ov-title"><b>${esc(st)}</b>${esc(list[0].stageName)}${isCur?' · 当前阶段':''}</div>
-        <div class="ov-meta">共 ${list.length} 个任务 ｜ ${esc(list[0].id)} → ${esc(list[list.length-1].id)} ｜ 已完成 ${dn}/${list.length}${dn===list.length?' ✓':''}</div>
-        ${newCalcs.length?`<div class="ov-newcalc">本阶段新学计算：${esc(newCalcs.join('、'))}</div>`:''}
+        <div class="ov-title"><b>${esc(st)}</b>${isCur?' · 当前阶段':''}</div>
+        <div class="ov-meta">第 ${weeks[0].w}–${weeks[weeks.length-1].w} 周 ｜ ${weeks.length} 周 ｜ 主任务 ${dn}/${tasks.length}${tasks.length&&dn===tasks.length?' ✓':''}</div>
+        <div class="ov-newcalc">本阶段主线：${esc((weeks[0].main||'').slice(0,58))}${weeks.length>1?' …':''}</div>
         <div class="ov-bar"><i style="width:${pct}%"></i></div>
-        <span class="ov-toggle">${isCur?'▾ 收起任务清单':'▸ 展开任务清单'}</span>
+        <span class="ov-toggle">${isCur?'▾ 收起每周任务':'▸ 展开每周任务'}</span>
       </div>
       <div class="ov-list ${isCur?'':'hidden'}" id="ov-${esc(st)}">
-        ${list.map(t=>{
-          const d=!!S.completed[t.id], c=!!(cur&&cur.id===t.id);
-          return `<div class="ov-item" data-action="open-task" data-id="${esc(t.id)}">
-            <span class="ov-id">${esc(t.id)}</span>
-            <span class="ov-body">
-              <span class="ov-topic">专题：${esc(t.topic)}${t.type!=='新课'?` · ${esc(t.type)}`:''}</span>
-              <span class="ov-calc">计算：${esc(calcName(t.calcTag))}${calcIsNew(t)?' · 🆕 新学':' · 保温'}</span>
-            </span>
-            <span class="ov-state ${d?'done':(c?'cur':'')}">${d?'✓ 已完成':(c?'进行中':'')}</span>
+        ${weeks.map(w=>{
+          const wt=WPTASKS.filter(t=>t.w===w.w), wd=wt.filter(t=>wpTaskDone(t,ws)).length;
+          return `<div class="ov-witem">
+            <div class="ov-whead"><b>第 ${w.w} 周</b><span>${esc(w.start||'')} ~ ${esc(w.end||'')}</span><span>${wd}/${wt.length} 项</span>${w.test?'<span class="wk-pill alt">阶段测</span>':''}</div>
+            <div class="ov-wmain">${esc(w.main||'')}</div>
+            <div class="ov-wtasks">${wt.length?wt.map(t=>`<button class="ov-wtask ${wpTaskDone(t,ws)?'done':''} ${((t.no-1)===cursor?'cur':'')}" data-action="wp-task" data-no="${t.no}"><em>${wpSeq(t.no)}</em>${esc((t.title||'').slice(0,36))}${((t.no-1)===cursor?' ← 当前':'')}</button>`).join(''):'<span class="hint">本周无新视频：计算 / 错题 / 阶段测</span>'}</div>
+            <div class="ov-wcalc">计算：${(w.calc||[]).map(c=>esc(calcName(c.tag))+' '+c.n+'题').join('、')||'—'} ｜ 回炉：${esc((w.review||[]).join('、')||'—')}</div>
           </div>`;
         }).join('')}
       </div>
@@ -2474,11 +2513,12 @@ document.addEventListener('click',e=>{
     case 'week-up-save': weekUploadSave(); break;
     case 'week-gate': weekOpenGate(); break;
     case 'week-redo': { const ids=dueMistakes().map(m=>m.id); if(ids.length) startRedoQueue(ids); break; }
-    case 'week-prev': { const ws=weekState(); if(ws.cur>1){ ws.cur--; save(); renderAll(); } break; }
-    case 'week-next': weekNext(); break;
+    case 'week-prev': weekViewShift(-1); break;
+    case 'week-next': weekViewShift(1); break;
+    case 'week-cur': weekViewCur(); break;
     case 'week-jump': weekJump(); break;
     case 'week-jump-go': weekJumpGo(); break;
-    case 'week-unlock': weekUnlock(id); break;
+    case 'week-unlock': weekUnlock(); break;
     case 'week-calcedit-add': WK_EDIT.push({tag:Object.keys(D.calcTagNames||{})[0]||'mixed',n:10}); renderCalcEditRows(Object.keys(D.calcTagNames||{})); break;
     case 'week-calcedit-del': if(WK_EDIT.length>1){ WK_EDIT.splice(parseInt(id,10),1); renderCalcEditRows(Object.keys(D.calcTagNames||{})); } break;
     case 'go-path': goPage('path'); break;
@@ -2516,15 +2556,19 @@ document.addEventListener('click',e=>{
     case 'sync-test': testSync(); break;
     case 'close-sheet': closeSheet(); break;
     case 'toggle-stage': {
-      const box=$('#ov-'+id); if(!box) break;
+      const box=document.getElementById('ov-'+id); if(!box) break;
       box.classList.toggle('hidden');
       const tg=el.querySelector('.ov-toggle');
-      if(tg) tg.textContent=box.classList.contains('hidden')?'▸ 展开任务清单':'▾ 收起任务清单';
+      if(tg) tg.textContent=box.classList.contains('hidden')?'▸ 展开每周任务':'▾ 收起每周任务';
       break; }
     case 'ov-expand': $$('.ov-list').forEach(x=>x.classList.remove('hidden'));
-      $$('.ov-toggle').forEach(x=>x.textContent='▾ 收起任务清单'); break;
+      $$('.ov-toggle').forEach(x=>x.textContent='▾ 收起每周任务'); break;
     case 'ov-collapse': $$('.ov-list').forEach(x=>x.classList.add('hidden'));
-      $$('.ov-toggle').forEach(x=>x.textContent='▸ 展开任务清单'); break;
+      $$('.ov-toggle').forEach(x=>x.textContent='▸ 展开每周任务'); break;
+    /* v21 任务页 / 阶段总览：全局序号任务 */
+    case 'wp-toggle': wpToggleTask(parseInt(el.dataset.no,10)); break;
+    case 'wp-task': wpOpenTask(parseInt(el.dataset.no,10)); break;
+    case 'wp-view-week': wpViewWeek(el.dataset.v); break;
     case 'open-wrong-browse': openWrongBrowse(); break;
     case 'wrong-browse': openWrongBrowse(); break;
     case 'bf-quick': {
@@ -2676,6 +2720,44 @@ const WP_END = WPW.length ? WPW[WPW.length-1].end : addDays(TODAY(), 600);
 const WP_START = WP.start || (WPW.length ? WPW[0].start : TODAY());
 const pad2 = n => String(n).padStart(2,'0');
 
+/* ==================== v21 · 全局任务序号（按执行表顺序，前一项没完成就锁住后一项） ====================
+   视频主条目按周→周内顺序编号 01..N；阶段测试周作为关卡插入同一序列。
+   日期/周次只是基准：落下就停在原地继续当前项，绝不随日历自动跳过。
+   当天「视频 / 计算 / 错题」三类互不锁，先做哪个都行；只有视频之间按序号串行。 */
+function buildWPTasks(){
+  const list=[];
+  WPW.forEach(w=>{
+    (w.videos||[]).filter(v=>!v.opt).forEach((v,vi)=>{
+      list.push({ no:list.length+1, w:w.w, kind:'video', vi, key:`W${pad2(w.w)}/v${vi}`,
+                  title:v.t, stage:w.stage, main:w.main||'' });
+    });
+    if(Object.prototype.hasOwnProperty.call(WP.gateWeeks||{},String(w.w))){
+      list.push({ no:list.length+1, w:w.w, kind:'gate', key:`W${pad2(w.w)}/gate`,
+                  title:(WP.gateWeeks||{})[String(w.w)]||'阶段达标测试', stage:w.stage, main:w.main||'' });
+    }
+  });
+  return list;
+}
+const WPTASKS=buildWPTasks();
+const WPSTAGES=[...new Set(WPW.map(w=>w.stage))];
+function wpTaskDone(t,ws){
+  if(!t) return false;
+  if(t.kind==='video') return !!ws.done[t.key];
+  const g=ws.gate&&ws.gate[`W${pad2(t.w)}`];
+  return !!(g&&g.passed) || !!ws.done[t.key];
+}
+/* 当前卡在第几项（0-based 下标）；返回 length 表示全部完成 */
+function wpCursor(ws){
+  for(let i=0;i<WPTASKS.length;i++) if(!wpTaskDone(WPTASKS[i],ws)) return i;
+  return WPTASKS.length;
+}
+function wpCurTask(){ const ws=weekState(),i=wpCursor(ws); return i<WPTASKS.length?WPTASKS[i]:null; }
+function wpCurWeek(){ const t=wpCurTask(); return t?t.w:(WPW.length||94); }
+function wpSeq(n){ return String(n).padStart(2,'0'); }
+/* 只看视图周：手动翻周不影响任务进度，刷新/打钩后自动回到当前任务 */
+let WK_VIEW=null;
+function wkViewWeek(){ const w=WK_VIEW; return (w>=1&&w<=WPW.length)?w:wpCurWeek(); }
+
 function weekState(){
   if(!S.week || typeof S.week!=='object') S.week={ cur:1, done:{}, calc:{}, gate:{} };
   const w=S.week;
@@ -2717,25 +2799,22 @@ function stepDone(ws,w,st){
   return !!ws.done[st.key];
 }
 function weekDone(ws,w){ const ss=weekSteps(w); return ss.length>0 && ss.every(st=>stepDone(ws,w,st)); }
-function stepUnlocked(ws,w,idx){
-  const ss=weekSteps(w);
-  for(let i=0;i<idx;i++) if(!stepDone(ws,w,ss[i])) return false;
-  return true;
-}
+/* v21：当天三类任务互不锁。视频之间的先后顺序由 WPTASKS 全局序号控制，不在这里锁。 */
+function stepUnlocked(ws,w,idx){ return true; }
 
 /* ---------- 进度偏离与实际完成日预测 ----------
    用「当前周实际打钩日 - 该周计划起始日」求偏移，再按已观测的实际周速外推 94 周结束日。 */
 function weekForecast(){
-  const ws=weekState(), wk0=wkAt(ws.cur)||{start:WP_START};
+  const ws=weekState(), curW=wpCurWeek(), wk0=wkAt(curW)||{start:WP_START};
   const planStart=wk0.start, planEndOfCur=wk0.end||addDays(planStart,6);
   // 本周实际开始日：本周最早一个实际打钩时间
-  const weekKeys=Object.keys(ws.done).filter(k=>k.indexOf('W'+pad2(ws.cur)+'/')===0);
+  const weekKeys=Object.keys(ws.done).filter(k=>k.indexOf('W'+pad2(curW)+'/')===0);
   const dates=weekKeys.map(k=>ws.done[k]).filter(Boolean).sort();
   const thisWeekActual=dates[0]||TODAY();
   const driftDays=dayDiff(planStart,thisWeekActual);           // 正=比计划晚
   // 实际周速：用已完成周（cur 之前的周）里，每周首个打钩日之间的平均间隔
   const starts=[];
-  for(let w=1;w<ws.cur;w++){
+  for(let w=1;w<curW;w++){
     const ks=Object.keys(ws.done).filter(k=>k.indexOf('W'+pad2(w)+'/')===0);
     const ds=ks.map(k=>ws.done[k]).filter(Boolean).sort();
     if(ds.length) starts.push(ds[0]);
@@ -2747,7 +2826,7 @@ function weekForecast(){
   } else if(starts.length===1){
     pace=clamp(dayDiff(starts[0],thisWeekActual),2,21);
   }
-  const remainW=Math.max(0,94-ws.cur+1);
+  const remainW=Math.max(0,94-curW+1);
   const eta=addDays(thisWeekActual, Math.round(remainW*pace));
   const planTotal=dayDiff(WP_START,WP_END);
   const etaDrift=dayDiff(WP_END,eta);                          // 正=整体延后
@@ -2778,7 +2857,7 @@ function weekRecycle(w){
 /* ---------- 渲染：本周打卡主页 ---------- */
 function renderWeek(){
   const root=$('#weekRoot'); if(!root) return;
-  const ws=weekState(), w=ws.cur, wk=wkAt(w);
+  const ws=weekState(), w=wkViewWeek(), wk=wkAt(w), ct=wpCurTask(), cursor=wpCursor(ws);
   const ts=$('#topStage'); if(ts) ts.textContent = wk ? `第 ${w}/94 周 · ${wk.stage}` : '94 周打卡';
   if(!wk){ root.innerHTML='<div class="card">94 周数据未加载，请确认 weekplan.js 已上传。</div>'; return; }
   const recycled=weekRecycle(w);
@@ -2786,7 +2865,16 @@ function renderWeek(){
   const todayDue=dueMistakes();
   const strong=fc.etaDrift>14?'落后':(fc.etaDrift<-14?'领先':'正常');
 
-  let html=`<div class="wk-hero">
+  /* 当前任务（全局序号）。落后就停在这项，不会跳到日历上「今天该做」的那项 */
+  let html=`<div class="wk-cur">
+    <div class="wkc-main"><span class="wkc-tag">当前任务 · 第 ${ct?wpSeq(ct.no)+' / '+WPTASKS.length:'✓'} 项</span>
+      <b>${ct?esc(ct.title):'执行表主任务已全部完成，可进入初中衔接'}</b>
+      <small>${ct?`第 ${ct.w} 周 · ${esc(ct.stage)} · ${ct.kind==='gate'?'阶段达标测试':'培优A视频'}`:''}</small></div>
+    ${ct?`<button class="btn tiny ghost" data-action="week-unlock">家长确认已完成</button>`:''}
+  </div>`;
+  if(WK_VIEW && w!==wpCurWeek()) html+=`<div class="wk-viewnote">正在查看第 ${w} 周（不影响任务进度）<button class="btn tiny ghost" data-action="week-cur">回到当前任务 ${ct?wpSeq(ct.no):''} ›</button></div>`;
+
+  html+=`<div class="wk-hero">
     <div class="wk-hero-l"><span class="wk-label">当前 · 第 ${w} / 94 周</span>
       <h3>${esc(wk.main)}</h3>
       <div class="wk-meta"><span class="wk-pill">${esc(wk.stage)}</span><span class="wk-pill alt">${esc(wk.attr)}</span>
@@ -2801,19 +2889,20 @@ function renderWeek(){
     </div>
   </div>`;
 
-  html+=`<div class="wk-bar"><div class="wk-bar-in" style="width:${Math.round((w-1)/94*100)}%"></div></div>
-    <div class="wk-bar-note">已推进 ${w-1} 周 · 剩 ${94-w+1} 周 · ${strong==='落后'?'⚠ 落后较多，建议压缩选做奥数周、利用假期补回':(strong==='领先'?'✅ 领先计划，可按节奏放缓或提前启动初中预热':'节奏正常，按周推进即可')}</div>`;
+  const wd=WPTASKS.filter(t=>wpTaskDone(t,ws)).length;
+  html+=`<div class="wk-bar"><div class="wk-bar-in" style="width:${Math.round(wd/WPTASKS.length*100)}%"></div></div>
+    <div class="wk-bar-note">主任务 ${wd}/${WPTASKS.length} 项完成 · 当前第 ${ct?wpSeq(ct.no):'—'} 项 · ${strong==='落后'?'⚠ 落后较多，建议压缩选做奥数周、利用假期补回':(strong==='领先'?'✅ 领先计划，可按节奏放缓或提前启动初中预热':'节奏正常，按序号推进即可')}</div>`;
 
-  // 串行步骤
+  // 当天三类任务互不锁：视频按全局序号，计算/错题随时可做
   const ss=weekSteps(w);
   html+=`<div class="wk-steps">`;
   ss.forEach((st,idx)=>{
-    const unlocked=stepUnlocked(ws,w,idx), done=stepDone(ws,w,st);
-    const cls=done?'done':(unlocked?'now':'lock');
-    html+=`<div class="wk-step ${cls}" id="wks-${st.kind}">
-      <div class="wk-step-h"><span class="wk-step-i">${done?'✓':(idx+1)}</span>
-        <b>${esc(st.label)}</b>${done?'<em>已完成</em>':(unlocked?'<em class="hot">待完成</em>':'<em>未解锁</em>')}</div>
-      <div class="wk-step-b">${weekStepBody(w,st,unlocked,done)}</div></div>`;
+    const done=stepDone(ws,w,st);
+    const tip=st.kind==='video'?'按序号':(done?'已完成':'随时可做');
+    html+=`<div class="wk-step ${done?'done':'now'}" id="wks-${st.kind}">
+      <div class="wk-step-h"><span class="wk-step-i">${done?'✓':''}</span>
+        <b>${esc(st.label)}</b><em class="${done?'':'hot'}">${tip}</em></div>
+      <div class="wk-step-b">${weekStepBody(w,st,true,done)}</div></div>`;
   });
   html+=`</div>`;
 
@@ -2827,11 +2916,12 @@ function renderWeek(){
 
   // 周切换
   html+=`<div class="wk-nav">
-    <button class="btn ghost" data-action="week-prev" ${w<=1?'disabled':''}>‹ 上一周</button>
-    <button class="btn" data-action="week-next" ${w>=94?'disabled':''}>完成本周 → 下一周 ›</button>
+    <button class="btn ghost" data-action="week-prev" ${w<=1?'disabled':''}>‹ 看上一周</button>
+    ${WK_VIEW?`<button class="btn" data-action="week-cur">🎯 回到当前任务</button>`:''}
+    <button class="btn ghost" data-action="week-next" ${w>=94?'disabled':''}>看下一周 ›</button>
     <button class="btn ghost" data-action="week-jump">跳到指定周</button>
   </div>`;
-  html+=`<div class="wk-foot">计划的日期只是基准；你每次打钩的实际时间会单独记下来，用来算偏离和预计完成日。日常有别的事打乱，或某专题偏难多花时间，都会自动反映在预测里。</div>`;
+  html+=`<div class="wk-foot">主视频按执行表序号推进：第 ${ct?wpSeq(ct.no):'—'} 项没完成，后面各项都锁着，落下也不会跳过。当天先看视频、先做计算、还是先清错题，随你。计划的日期只是基准；打钩的实际时间单独记录，用来算偏离和预计完成日。</div>`;
 
   root.innerHTML=html;
 }
@@ -2842,15 +2932,19 @@ function weekStepBody(w,st,unlocked,done){
   if(!unlocked) return `<p class="hint">先完成上一步，这里才会解锁。</p>`;
   if(st.kind==='video'){
     const vids=(wk.videos||[]).filter(v=>!v.opt);
-    if(!vids.length) return `<p class="hint">本周培优A 无对应新视频（规则型计算家长讲 3 分钟 + 直接练，或概念日看校内同步）。<br>备选：${esc(wk.backup||'无')}</p>
-      <div class="btn-row"><button class="btn" data-action="week-video-ok" data-id="none">✓ 本周视频已完成</button></div>`;
+    if(!vids.length) return `<p class="hint">本周无新视频：规则型计算家长讲 3 分钟 + 直接练；阶段测试周做出口测；二轮 / 查漏周直接做错题。<br>校内同步备选：${esc(wk.backup||'无')}</p>`;
+    const cursor=wpCursor(ws);
     return `<div class="wk-vlist">${vids.map((v,i)=>{
-        const d=ws.done[`W${pad2(w)}/v${i}`];
-        return `<div class="wk-vitem ${d?'ok':''}"><button class="wk-check" data-action="week-video" data-id="${i}">${d?'✓':'○'}</button>
-          <span>${esc(v.t)}</span>${d?`<small>${esc(cnDate(d))} 完成</small>`:''}</div>`;
+        const key=`W${pad2(w)}/v${i}`, d=ws.done[key];
+        const task=WPTASKS.find(t=>t.key===key), no=task?task.no:null;
+        const locked=!!no&&!d&&(no-1)!==cursor, isCur=!!no&&(no-1)===cursor;
+        return `<div class="wk-vitem ${d?'ok':''} ${locked?'locked':''} ${isCur?'iscur':''}">
+          <button class="wk-check" data-action="week-video" data-id="${no||i}" ${locked?'disabled':''}>${d?'✓':(locked?'🔒':'○')}</button>
+          <span>${no?`<em class="wk-no">${wpSeq(no)}</em>`:''}${esc(v.t)}</span>
+          ${d?`<small>${esc(cnDate(d))} 完成</small>`:(locked?'<small>先完成前一项</small>':(isCur?'<small class="hot">← 当前这项</small>':''))}</div>`;
       }).join('')}</div>
       ${wk.backup?`<p class="hint">卡住时才看的校内同步备选：${esc(wk.backup)}</p>`:''}
-      <p class="hint">看完让孩子用 1 句话复述讲了什么。已学过又做错的回炉专题直接做错题，不用重看整讲。</p>`;
+      <p class="hint">按序号看：前一项没打钩，后面都锁着；落下就继续当前这项，不会跳过去。看完让孩子用 1 句话复述讲了什么。已学过又做错的回炉专题直接做错题，不用重看整讲。</p>`;
   }
   if(st.kind==='calc'){
     const days=[];
@@ -2882,20 +2976,25 @@ function weekStepBody(w,st,unlocked,done){
 
 /* ---------- v20 交互 ---------- */
 let WK_CALC=null;   // 当前每日计算练习
-function weekVideoToggle(i){
-  const ws=weekState(), w=ws.cur, k=`W${pad2(w)}/v${i}`;
-  if(ws.done[k]) delete ws.done[k]; else ws.done[k]=activeDate();
-  save(); renderAll();
-  if(stepDone(ws,w,weekSteps(w).find(s=>s.kind==='video'))) toast('✓ 本周视频已看完，每日计算解锁');
+function weekVideoToggle(no){
+  const ws=weekState(), cursor=wpCursor(ws);
+  const t=WPTASKS.find(x=>x.no===no&&x.kind==='video');
+  if(!t) return;
+  if(ws.done[t.key]){ delete ws.done[t.key]; WK_VIEW=null; save(); renderAll();
+    toast('已取消第 '+wpSeq(no)+' 项的打钩，当前任务回到这一项'); return; }
+  if((no-1)!==cursor){ toast('请先完成第 '+wpSeq(cursor+1)+' 项：'+((WPTASKS[cursor]||{}).title||'')); return; }
+  ws.done[t.key]=activeDate(); WK_VIEW=null; save(); renderAll();
+  const nt=wpCurTask();
+  toast(nt?`✓ 第 ${wpSeq(no)} 项完成，下一项：第 ${wpSeq(nt.no)} 项`:'✓ 全部主任务已完成');
 }
 function weekVideoNone(){
-  const ws=weekState(), w=ws.cur, wk=wkAt(w)||{}, vids=(wk.videos||[]).filter(v=>!v.opt);
+  const ws=weekState(), w=wkViewWeek(), wk=wkAt(w)||{}, vids=(wk.videos||[]).filter(v=>!v.opt);
   if(vids.length) return;
-  ws.done[`W${pad2(w)}/video`]=activeDate(); save(); renderAll(); toast('✓ 已确认，每日计算解锁');
+  ws.done[`W${pad2(w)}/video`]=activeDate(); save(); renderAll(); toast('✓ 已确认');
 }
 /* 每日计算：用本周类型的题生成一套，判分后打钩 */
 function weekOpenCalc(ds){
-  const ws=weekState(), w=ws.cur, cfg=weekCalcCfg(w,ds);
+  const ws=weekState(), w=wkViewWeek(), cfg=weekCalcCfg(w,ds);
   const items=[];
   cfg.forEach(c=>{
     const fn=GEN[c.tag]||GEN.mixed, half=Math.ceil(c.n/2);
@@ -2980,17 +3079,17 @@ function weekUploadSave(){
   if(!text&&!WK_UP.imageKey){ toast('请填题目文字或上传照片'); return; }
   const cat=$('#wuCat')?$('#wuCat').value:'综合';
   const d=($('#wuDate')&&$('#wuDate').value)||activeDate();
-  addMistake({taskId:'',stage:'第'+weekState().cur+'周',tag:cat,topicTag:cat,
+  addMistake({taskId:'',stage:'第'+wkViewWeek()+'周',tag:cat,topicTag:cat,
     type:WK_UP.kind==='calc'?'calc':'word',source:'本周错题',date:d,
     question:text,imageKey:WK_UP.imageKey,
     childAnswer:($('#wuChild')&&$('#wuChild').value.trim())||'',correctAnswer:($('#wuCorrect')&&$('#wuCorrect').value.trim())||'',
     reason:($('#wuReason')&&$('#wuReason').value)||'思路错误',note:($('#wuNote')&&$('#wuNote').value.trim())||''});
-  const ws=weekState(); ws.done[`W${pad2(ws.cur)}/upload`]=activeDate();
+  const ws=weekState(), vw=wkViewWeek(); WK_VIEW=null; ws.done[`W${pad2(vw)}/upload`]=activeDate();
   save(); closeSheet(); renderAll(); toast('✓ 已存入错题本，之后每天会排重做');
 }
 /* 每日题型/题量编辑 */
 function openWeekCalcEdit(){
-  const ws=weekState(), w=ws.cur;
+  const w=wkViewWeek();
   const allTags=Object.keys(D.calcTagNames||{});
   openSheet(`第 ${w} 周 · 调整每日计算`, `
     <div class="card"><p class="hint">这一周每天做的计算类型和题量。可以只留 1 类，也可以加几类；家长按孩子情况改。改完这一周每天都按这个来。</p>
@@ -3010,7 +3109,7 @@ function renderCalcEditRows(tags){
     <button class="btn tiny ghost" data-action="week-calcedit-del" data-id="${i}">删</button></div>`).join('');
 }
 function weekCalcEditSave(){
-  const ws=weekState(), w=ws.cur;
+  const ws=weekState(), w=wkViewWeek();
   WK_EDIT.forEach((c,i)=>{
     const ts=document.querySelector(`[data-wce-tag="${i}"]`), ns=document.querySelector(`[data-wce-n="${i}"]`);
     if(ts) c.tag=ts.value; if(ns) c.n=clamp(parseInt(ns.value,10)||10,1,60);
@@ -3019,46 +3118,39 @@ function weekCalcEditSave(){
   save(); closeSheet(); renderAll(); toast('✓ 这一周的计算设置已保存');
 }
 
-/* 周推进 / 跳转 / 强制解锁 */
-function weekNext(){
-  const ws=weekState(), w=ws.cur;
-  const ss=weekSteps(w), incomplete=ss.filter(st=>!stepDone(ws,w,st));
-  if(incomplete.length){
-    const need=incomplete.map(st=>st.label).join('、');
-    toast('本周还没完成：'+need+'。完成后才能进入下一周');
-    openSheet('本周还有任务没完成', `<div class="card"><h3>先完成下面 ${incomplete.length} 项</h3>
-      <ul>${incomplete.map(st=>`<li>${esc(st.label)}</li>`).join('')}</ul>
-      <p class="hint">任务按「视频 → 每日计算 → 周末错题上传${wkAt(w)&&wkAt(w).test?' → 达标测试':''}」串行解锁。都完成了才能进下一周。</p>
-      <div class="btn-row"><button class="btn ghost" data-action="week-unlock" data-id="${w}">家长确认：这些内容确实都完成了，强制解锁</button>
-      <button class="btn ghost" data-action="close-sheet">回去继续</button></div></div>`);
-    return;
-  }
-  if(w>=94){ toast('94 周已全部完成，进入初中衔接'); return; }
-  ws.cur=w+1; save(); renderAll(); toast('✓ 进入第 '+(w+1)+' 周');
+/* 周切换（仅看视图，不改任务进度）/ 家长强制确认当前项 */
+function weekViewShift(d){
+  const base=wkViewWeek(), v=clamp(base+d,1,WPW.length||94);
+  WK_VIEW=(v===wpCurWeek())?null:v; renderAll();
 }
-function weekUnlock(w){
-  const ws=weekState();
-  w=parseInt(w,10)||ws.cur;
-  const ss=weekSteps(w); ss.forEach(st=>{ if(!stepDone(ws,w,st)) ws.done[st.key]=activeDate(); });
-  if(w>=94){ closeSheet(); toast('已是最后一周'); return; }
-  ws.cur=w+1; save(); closeSheet(); renderAll(); toast('✓ 已强制解锁并进入第 '+(w+1)+' 周');
+function weekViewCur(){ WK_VIEW=null; renderAll(); }
+function weekUnlock(){
+  const ws=weekState(), t=wpCurTask();
+  if(!t){ closeSheet(); toast('主任务已全部完成'); return; }
+  if(t.kind==='video') ws.done[t.key]=activeDate();
+  else { if(!ws.gate) ws.gate={}; ws.gate[`W${pad2(t.w)}`]={rate:100,passed:true,at:TODAY(),byParent:true}; ws.done[t.key]=activeDate(); }
+  WK_VIEW=null; save(); closeSheet(); renderAll();
+  const nt=wpCurTask();
+  toast('✓ 家长确认第 '+wpSeq(t.no)+' 项已完成'+(nt?('，下一项：第 '+wpSeq(nt.no)+' 项'):''));
 }
 function weekJump(){
-  const ws=weekState();
-  openSheet('跳到指定周', `<div class="card"><p class="hint">计划日期只是基准。实际进度以你打钩为准；这里可以直接跳到某一周补录或查看。</p>
-    <label class="lbl">第几周（1–94）</label><input type="number" id="wjNum" min="1" max="94" value="${ws.cur}">
-    <div class="btn-row"><button class="btn" data-action="week-jump-go">跳转</button></div>
-    <p class="hint">当前第 ${ws.cur} 周 · 计划 ${esc((wkAt(ws.cur)||{}).start||'')} 起</p></div>`);
+  const ct=wpCurTask(), cw=wpCurWeek();
+  openSheet('看指定周', `<div class="card"><p class="hint">只是查看某一周的执行表，不影响任务序号。落下没做完的任务永远停在原地，不会随日期跳过。</p>
+    <label class="lbl">第几周（1–${WPW.length||94}）</label><input type="number" id="wjNum" min="1" max="${WPW.length||94}" value="${wkViewWeek()}">
+    <div class="btn-row"><button class="btn" data-action="week-jump-go">查看这一周</button>
+      <button class="btn ghost" data-action="week-cur">回到当前任务</button></div>
+    <p class="hint">当前任务：第 ${ct?wpSeq(ct.no):'—'} 项 · 第 ${cw} 周 · 计划 ${esc((wkAt(cw)||{}).start||'')} 起</p></div>`);
 }
 function weekJumpGo(){
   const v=parseInt($('#wjNum')&&$('#wjNum').value,10);
-  if(!(v>=1&&v<=94)){ toast('请输入 1–94 之间的周次'); return; }
-  const ws=weekState(); ws.cur=v; save(); closeSheet(); renderAll(); toast('已跳到第 '+v+' 周');
+  if(!(v>=1&&v<=WPW.length)){ toast('请输入 1–'+WPW.length+' 之间的周次'); return; }
+  WK_VIEW=(v===wpCurWeek())?null:v; closeSheet(); renderAll();
+  toast('已切到第 '+v+' 周'+(WK_VIEW?'（仅查看，不影响任务进度）':''));
 }
 
 /* 阶段达标测试：复用 buildMasteryTest，套一个本周虚空任务 */
 function weekOpenGate(){
-  const ws=weekState(), w=ws.cur, wk=wkAt(w)||{};
+  const ws=weekState(), w=wkViewWeek(), wk=wkAt(w)||{};
   const fake={ id:'W'+pad2(w), stage:wk.stage||'W'+pad2(w), stageName:wk.attr||'阶段', topicTag:(wk.review&&wk.review[0])||'综合',
                calcTag:(wk.calc&&wk.calc[0]&&wk.calc[0].tag)||'mixed', type:'达标测试', calcCount:'6' };
   MT=buildMasteryTest(fake);

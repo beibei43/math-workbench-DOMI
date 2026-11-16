@@ -23,7 +23,7 @@
 
   <!-- ========== 本周打卡（v20 默认页 · 94 周主线 · 串行推送 + 计划/实际偏离） ========== -->
   <section class="page active" id="page-week">
-    <div class="page-head"><h2>本周打卡 · 94 周执行表</h2><p>照执行表逐周推进：看完视频打钩 → 每天计算打钩 → 周末错题上传。完成前一项才解锁下一项。打钩时间会记下来，自动算出比计划偏离多少、预计哪天全部完成。</p></div>
+    <div class="page-head"><h2>本周打卡 · 94 周执行表</h2><p>视频按执行表序号推进：前一项没打钩，后面全部锁住；落下就停在原地继续那一项，不会随日历跳过。当天的视频 / 计算 / 错题先做哪个都行。打钩时间单独记录，用来算偏离和预计完成日。</p></div>
     <div id="weekRoot"></div>
   </section>
 
@@ -47,7 +47,7 @@
     </button>
 
     <div class="quick-row">
-      <button class="quick" data-action="go-overview"><b>📚 阶段总览</b><small id="quickOverview">10 个阶段 · 114 个任务</small></button>
+      <button class="quick" data-action="go-overview"><b>📚 阶段总览</b><small id="quickOverview">8 个阶段 · 94 周 · 126 项主任务</small></button>
       <button class="quick" data-action="open-wrong-browse"><b>✎ 在册错题</b><small id="quickWrong">0 题 · 可浏览 / 重做</small></button>
     </div>
 
@@ -61,7 +61,7 @@
 
   <!-- ========== 阶段总览（预览） ========== -->
   <section class="page" id="page-overview">
-    <div class="page-head"><h2>阶段总览</h2><p>每个阶段有多少任务、分别是什么（计算 + 专题都列出来）；点任务可看详情、底层逻辑、要点、易错点与例题。</p></div>
+    <div class="page-head"><h2>阶段总览 · 94 周执行表</h2><p>按最新执行表的 8 个阶段展开：每周的主线、视频序号、计算类型、回炉专题一目了然。点任一视频可看详情或打钩。</p></div>
     <div class="overview-summary" id="overviewSummary"></div>
     <div id="calcMap"></div>
     <div class="btn-row"><button class="btn ghost" data-action="ov-expand">全部展开</button><button class="btn ghost" data-action="ov-collapse">全部收起</button></div>
@@ -87,7 +87,7 @@
 
   <!-- ========== 任务序列 ========== -->
   <section class="page" id="page-tasks">
-    <div class="page-head"><h2>任务序列</h2><p>按编号线性推进，不绑定日期；卡住就原地反复练，达标后才顺延。</p></div>
+    <div class="page-head"><h2>任务序列 · 执行表 01 → N</h2><p>整份执行表的主任务按序号排列（视频 + 阶段测）。前一项没完成，后面全部锁住；落下就停在原地继续那一项，不按日历跳。点任务看详情、打钩或跳到那一周。</p></div>
     <div class="card day-entry">
       <h3>📅 按日期回看 / 补录</h3>
       <p class="hint">昨天漏记的题、周一做过的任务、想提前看某天的安排，点这里打开；补录的内容会自动记到那一天。</p>
