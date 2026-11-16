@@ -6,7 +6,7 @@
 const $  = s => document.querySelector(s);
 const $$ = s => Array.prototype.slice.call(document.querySelectorAll(s));
 const D  = window.APP_DATA;
-const APP_VER = 'v23';   /* 界面上可见的版本号：更新后数字变了，说明新文件已生效 */
+const APP_VER = 'v24';   /* 界面上可见的版本号：更新后数字变了，说明新文件已生效 */
 const GUIDE = window.TOPIC_GUIDE || {};
 const CALC = window.CALC_GUIDE || {};
 const TASKS = D.tasks;
@@ -1306,7 +1306,10 @@ function goPage(id){
 }
 function backPage(){
   if(NAV.page.length>1) NAV.page.pop();
-  applyPage(NAV.page[NAV.page.length-1]||'home');
+  let p=NAV.page[NAV.page.length-1]||'week';
+  if(p==='home') p='week';   /* 旧版首页已下线，返回时不再落回去 */
+  NAV.page[NAV.page.length-1]=p;
+  applyPage(p);
 }
 function sheetOpen(){ return !$('#sheet').classList.contains('hidden'); }
 function openSheet(title,html,opts){
@@ -2560,15 +2563,10 @@ document.addEventListener('click',e=>{
     case 'path-unpass': {
       delete S.pathDone[id]; save(); closeSheet(); renderAll(); toast('已取消 '+id+' 的打钩');
       break; }
-    case 'go-day': {
-      const v=el.dataset.v||'today'; let d=TODAY();
-      if(v==='-1') d=addDays(TODAY(),-1);
-      else if(v==='mon') d=addDays(weekDaysOf(TODAY())[0],1);
-      setActiveDate(d);
-      if(activePage()!=='home'){ NAV.page=['home']; applyPage('home'); }
-      const box=$('#currentTask');
-      if(box&&box.scrollIntoView) box.scrollIntoView({behavior:'smooth',block:'start'});
-      if(v==='pick') setTimeout(()=>{ const p=$('#dayPick'); if(p){ p.focus(); try{ if(p.showPicker) p.showPicker(); }catch(err){} } },280);
+    case 'go-day':                       /* 旧版按日回看入口已下线，统一回到新版本周打卡 */
+    case 'go-week-cur': {
+      WK_VIEW=null; setActiveDate(TODAY());
+      NAV.page=['week']; applyPage('week'); renderAll();
       break;
     }
     case 'go-home': goPage('week'); break;

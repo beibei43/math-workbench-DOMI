@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon.svg">
-<link rel="stylesheet" href="styles.css?v23">
+<link rel="stylesheet" href="styles.css?v24">
 </head>
 <body>
 
@@ -72,14 +72,9 @@
   <section class="page" id="page-plan">
     <div class="page-head"><h2>阶段时间线 · 进度规划</h2><p>每个阶段按南宁校历给出起止日期；系统把阶段时长均摊到各任务，给出「建议完成窗口」。下方可填写每道题的<b>实际开始 / 结束日</b>，自动对比「提前 / 准时 / 滞后」。日期为预测值的会在日历卡上标注「预测」，官方公布后请在「家长设置 → 校历校准」调整。</p>    </div>
     <div class="card day-entry">
-      <h3>📅 按日期回看 / 补录</h3>
-      <p class="hint">规划表是按周排的；想看具体某一天（比如周一）做了什么、或补录那天的题，点这里。</p>
-      <div class="btn-row">
-        <button class="btn small" data-action="go-day" data-v="-1">看昨天</button>
-        <button class="btn small ghost" data-action="go-day" data-v="mon">看本周一</button>
-        <button class="btn small ghost" data-action="go-day" data-v="pick">📅 自选日期</button>
-        <button class="btn small ghost" data-action="go-day" data-v="today">回到今天</button>
-      </div>
+      <h3>🎯 回到本周打卡</h3>
+      <p class="hint">所有任务都按 94 周执行表在「本周」页打卡。想看某一周安排，用本周页的「看上一周 / 下一周 / 跳到指定周」——只查看，不改进度。</p>
+      <div class="btn-row"><button class="btn small" data-action="go-week-cur">🎯 回到本周打卡</button></div>
     </div>
     <div id="planList"></div>
     <p class="hint" style="margin-top:4px">说明：S4–S8 为按校历规律推算的「预测」值，已在日历卡上标注「预测」。如要微调，直接改 <b>calendar.js</b> 里对应阶段的 <code>start/end</code> 即可，保存刷新页面即生效（也可把官方公布日期发我，我来改）。</p>
@@ -89,14 +84,9 @@
   <section class="page" id="page-tasks">
     <div class="page-head"><h2>任务序列 · 执行表 01 → N</h2><p>整份执行表的主任务按序号排列（视频 + 阶段测）。前一项没完成，后面全部锁住；落下就停在原地继续那一项，不按日历跳。<b>点已完成的任务=预览详情（不改进度）；要打钩会先弹确认；撤销需单独确认。</b></p></div>
     <div class="card day-entry">
-      <h3>📅 按日期回看 / 补录</h3>
-      <p class="hint">昨天漏记的题、周一做过的任务、想提前看某天的安排，点这里打开；补录的内容会自动记到那一天。</p>
-      <div class="btn-row">
-        <button class="btn small" data-action="go-day" data-v="-1">看昨天</button>
-        <button class="btn small ghost" data-action="go-day" data-v="mon">看本周一</button>
-        <button class="btn small ghost" data-action="go-day" data-v="pick">📅 自选日期</button>
-        <button class="btn small ghost" data-action="go-day" data-v="today">回到今天</button>
-      </div>
+      <h3>🎯 回到本周打卡</h3>
+      <p class="hint">任务按 94 周执行表在「本周」页打卡：视频 / 每日计算 / 回炉专题 / 周末错题。按全局序号推进，落下就停原地不跳过。想看某一周用本周页的翻周按钮。</p>
+      <div class="btn-row"><button class="btn small" data-action="go-week-cur">🎯 回到本周打卡</button></div>
     </div>
     <div class="btn-row">
       <button class="btn ghost" data-action="go-overview">📚 查看阶段总览：每阶段多少任务、分别是什么</button>
@@ -280,15 +270,15 @@
 <div class="toast hidden" id="toast"></div>
 <div id="printArea"></div>
 
-<script src="data.js?v23"></script>
-<script src="weekplan.js?v23"></script>
-<script src="path.js?v23"></script>
-<script src="topics.js?v23"></script>
-<script src="calcguide.js?v23"></script>
-<script src="classify.js?v23"></script>
-<script src="variants.js?v23"></script>
-<script src="calendar.js?v23"></script>
-<script src="sync.js?v23"></script>
-<script src="app.js?v23"></script>
+<script src="data.js?v24"></script>
+<script src="weekplan.js?v24"></script>
+<script src="path.js?v24"></script>
+<script src="topics.js?v24"></script>
+<script src="calcguide.js?v24"></script>
+<script src="classify.js?v24"></script>
+<script src="variants.js?v24"></script>
+<script src="calendar.js?v24"></script>
+<script src="sync.js?v24"></script>
+<script src="app.js?v24"></script>
 </body>
 </html>
