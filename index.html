@@ -21,8 +21,19 @@
 
 <main id="app">
 
-  <!-- ========== 首页 ========== -->
-  <section class="page active" id="page-home">
+  <!-- ========== 本周打卡（v20 默认页 · 94 周主线 · 串行推送 + 计划/实际偏离） ========== -->
+  <section class="page active" id="page-week">
+    <div class="page-head"><h2>本周打卡 · 94 周执行表</h2><p>照执行表逐周推进：看完视频打钩 → 每天计算打钩 → 周末错题上传。完成前一项才解锁下一项。打钩时间会记下来，自动算出比计划偏离多少、预计哪天全部完成。</p></div>
+    <div id="weekRoot"></div>
+  </section>
+
+  <!-- ========== 学习路径（保留 · 规划展示 + 打钩 + 达标门） ========== -->
+  <section class="page" id="page-path">
+    <div id="pathRoot"></div>
+  </section>
+
+  <!-- ========== 首页（旧版每日节奏，保留为次要工具页） ========== -->
+  <section class="page" id="page-home">
     <div class="board">
       <div class="stat"><span>当前任务</span><b id="stCurrent">—</b></div>
       <div class="stat"><span>已完成 / 总数</span><b id="stDone">0 / 82</b></div>
@@ -36,7 +47,7 @@
     </button>
 
     <div class="quick-row">
-      <button class="quick" data-action="go-overview"><b>📚 阶段总览</b><small id="quickOverview">8 个阶段 · 82 个任务</small></button>
+      <button class="quick" data-action="go-overview"><b>📚 阶段总览</b><small id="quickOverview">10 个阶段 · 114 个任务</small></button>
       <button class="quick" data-action="open-wrong-browse"><b>✎ 在册错题</b><small id="quickWrong">0 题 · 可浏览 / 重做</small></button>
     </div>
 
@@ -244,7 +255,8 @@
 </main>
 
 <nav class="tabbar">
-  <button class="tab active" data-tab="home"><i>⌂</i><span>首页</span></button>
+  <button class="tab active" data-tab="week"><i>✓</i><span>本周</span></button>
+  <button class="tab" data-tab="path"><i>▤</i><span>路径</span></button>
   <button class="tab" data-tab="tasks"><i>☰</i><span>任务</span></button>
   <button class="tab" data-tab="plan"><i>📅</i><span>规划</span></button>
   <button class="tab" data-tab="wrong"><i>✎</i><span>错题</span><b class="badge hidden" id="wrongBadge">0</b></button>
@@ -267,6 +279,8 @@
 <div id="printArea"></div>
 
 <script src="data.js"></script>
+<script src="weekplan.js"></script>
+<script src="path.js"></script>
 <script src="topics.js"></script>
 <script src="calcguide.js"></script>
 <script src="classify.js"></script>
