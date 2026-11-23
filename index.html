@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon.svg">
-<link rel="stylesheet" href="styles.css?v24">
+<link rel="stylesheet" href="styles.css?v27">
 </head>
 <body>
 
@@ -23,7 +23,7 @@
 
   <!-- ========== 本周打卡（v20 默认页 · 94 周主线 · 串行推送 + 计划/实际偏离） ========== -->
   <section class="page active" id="page-week">
-    <div class="page-head"><h2>本周打卡 · 94 周执行表</h2><p><b>这是给家长记录用的工作台</b>，孩子不在这里做题。本周固定四项：① 本周视频（按执行表序号推进，前一项没打钩后面全锁住，落下就停原地不跳周）② 每日计算（线下买题做，只记录内容+打钩，不出题不判分）③ 回炉专题（每周一个，做当时的错题，不看视频）④ 周末错题上传（单题拍照或整份文件，自动按专题编号）。四类互不锁，先做哪个都行；周末还会按 1/3/7 天提醒要复习的旧错题。<b>打钩前会先弹确认，误点「取消」进度不变；已完成的任务可在顶部「已完成 N 项 · 查看/撤销」里预览或撤销。</b></p></div>
+    <div class="page-head"><h2>本周打卡 · 94 周执行表</h2><p><b>这是给家长记录用的工作台</b>，孩子不在这里做题。本周固定四项：① 本周视频（按执行表序号排列，但<b>不强制顺序</b>，想先看哪讲、想跳过哪讲都行，跳过的写原因留待补）② 每日计算（线下买题做，只记录内容+打钩，不出题不判分）③ 回炉专题（每周一个，做当时的错题，不看视频）④ 周末错题上传（单题拍照或整份文件，自动按专题编号）。四类互不锁；周末还会按 1/3/7 天提醒要复习的旧错题。<b>打钩前先弹确认，误点「取消」进度不变；已完成的可在顶部「已完成 N 项」预览/撤销，跳过延后的在「待补 N 项」里找回。</b></p></div>
     <div id="weekRoot"></div>
   </section>
 
@@ -80,23 +80,46 @@
     <p class="hint" style="margin-top:4px">说明：S4–S8 为按校历规律推算的「预测」值，已在日历卡上标注「预测」。如要微调，直接改 <b>calendar.js</b> 里对应阶段的 <code>start/end</code> 即可，保存刷新页面即生效（也可把官方公布日期发我，我来改）。</p>
   </section>
 
-  <!-- ========== 任务序列 ========== -->
+  <!-- ========== 任务序列（v26：任务卡 + 回炉卡 两种卡） ========== -->
   <section class="page" id="page-tasks">
-    <div class="page-head"><h2>任务序列 · 执行表 01 → N</h2><p>整份执行表的主任务按序号排列（视频 + 阶段测）。前一项没完成，后面全部锁住；落下就停在原地继续那一项，不按日历跳。<b>点已完成的任务=预览详情（不改进度）；要打钩会先弹确认；撤销需单独确认。</b></p></div>
-    <div class="card day-entry">
-      <h3>🎯 回到本周打卡</h3>
-      <p class="hint">任务按 94 周执行表在「本周」页打卡：视频 / 每日计算 / 回炉专题 / 周末错题。按全局序号推进，落下就停原地不跳过。想看某一周用本周页的翻周按钮。</p>
-      <div class="btn-row"><button class="btn small" data-action="go-week-cur">🎯 回到本周打卡</button></div>
+    <div class="page-head"><h2>两张卡 · 任务卡 & 回炉卡</h2><p><b>任务卡</b>＝执行表主任务（视频 + 阶段测）按序号 01→N 排列；<b>回炉卡</b>＝94 周回炉专题按序号排列，附建议完成日，可单独打钩。两张卡都<b>不强制按顺序</b>：任何一项随时能打钩，不想现在做的点「先跳过」写原因，标 ⏭ 延后，之后到「待补清单」找回。<b>点已完成/已延后的项＝预览详情（不改进度）；打钩先弹确认；撤销需单独确认。</b></p></div>
+    <div class="card-switch" id="taskCardSwitch">
+      <button class="cs-b on" data-action="task-card-tab" data-v="task">☰ 任务卡 · 视频 / 阶段测 01→N</button>
+      <button class="cs-b" data-action="task-card-tab" data-v="review">↻ 回炉卡 · 94 专题 + 建议日</button>
     </div>
-    <div class="btn-row">
-      <button class="btn ghost" data-action="go-overview">📚 查看阶段总览：每阶段多少任务、分别是什么</button>
-      <button class="btn ghost" data-action="open-inbox">📥 随手录题（不绑定本任务）</button>
+
+    <div id="taskCardPane">
+      <div class="card day-entry">
+        <h3>🎯 回到本周打卡</h3>
+        <p class="hint">任务按 94 周执行表在「本周」页打卡：视频 / 每日计算 / 回炉专题 / 周末错题。不强制顺序：任意一项随时可做；想看某一周用本周页的翻周按钮。</p>
+        <div class="btn-row"><button class="btn small" data-action="go-week-cur">🎯 回到本周打卡</button></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn ghost" data-action="go-overview">📚 查看阶段总览：每阶段多少任务、分别是什么</button>
+        <button class="btn ghost" data-action="open-inbox">📥 随手录题（不绑定本任务）</button>
+      </div>
+      <div class="filter-row">
+        <select id="taskStageFilter"><option value="">全部阶段</option></select>
+        <select id="taskStateFilter"><option value="">全部状态</option><option value="done">已完成</option><option value="todo">未完成</option></select>
+      </div>
+      <div id="taskList"></div>
     </div>
-    <div class="filter-row">
-      <select id="taskStageFilter"><option value="">全部阶段</option></select>
-      <select id="taskStateFilter"><option value="">全部状态</option><option value="done">已完成</option><option value="todo">未完成</option></select>
+
+    <div id="reviewCardPane" class="hidden">
+      <div class="card wptip"><p class="hint" id="rvIntro">回炉卡：把 94 周执行表里每周的回炉专题按序号排好，标出建议完成周与日期。每一项都<b>列了题目</b>：点「看题目／题意」能看到这个专题是什么意思、怎么认出来、典型例题（带解法答案），以及你已上传的该专题在册错题。回炉＝<b>只做当时错过的题，不看视频</b>，全对才打钩。这里打钩与「本周打卡 → 回炉专题」用的是同一个记录，两边同步。</p></div>
+      <div class="overview-summary" id="rvSummary"></div>
+      <div class="filter-row">
+        <select id="rvRoundFilter"><option value="">全部轮次</option></select>
+        <select id="rvStateFilter"><option value="">全部状态</option><option value="done">已打钩</option><option value="todo">待打钩</option><option value="skip">已跳过</option></select>
+        <select id="rvSort"><option value="seq">按序号 01→94</option><option value="dueAsc">按建议日（近→远）</option><option value="dueDesc">按建议日（远→近）</option></select>
+      </div>
+      <div class="btn-row">
+        <button class="btn small" data-action="go-week-cur">🎯 回到本周打卡</button>
+        <button class="btn small ghost" data-action="rv-done-list">已打钩清单</button>
+        <button class="btn small ghost" data-action="rv-skip-list">待补清单</button>
+      </div>
+      <div id="reviewList"></div>
     </div>
-    <div id="taskList"></div>
   </section>
 
   <!-- ========== 专题题库：随手录入的应用题 ========== -->
@@ -270,15 +293,15 @@
 <div class="toast hidden" id="toast"></div>
 <div id="printArea"></div>
 
-<script src="data.js?v24"></script>
-<script src="weekplan.js?v24"></script>
-<script src="path.js?v24"></script>
-<script src="topics.js?v24"></script>
-<script src="calcguide.js?v24"></script>
-<script src="classify.js?v24"></script>
-<script src="variants.js?v24"></script>
-<script src="calendar.js?v24"></script>
-<script src="sync.js?v24"></script>
-<script src="app.js?v24"></script>
+<script src="data.js?v27"></script>
+<script src="weekplan.js?v27"></script>
+<script src="path.js?v27"></script>
+<script src="topics.js?v27"></script>
+<script src="calcguide.js?v27"></script>
+<script src="classify.js?v27"></script>
+<script src="variants.js?v27"></script>
+<script src="calendar.js?v27"></script>
+<script src="sync.js?v27"></script>
+<script src="app.js?v27"></script>
 </body>
 </html>

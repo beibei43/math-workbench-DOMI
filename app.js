@@ -6,7 +6,7 @@
 const $  = s => document.querySelector(s);
 const $$ = s => Array.prototype.slice.call(document.querySelectorAll(s));
 const D  = window.APP_DATA;
-const APP_VER = 'v24';   /* 界面上可见的版本号：更新后数字变了，说明新文件已生效 */
+const APP_VER = 'v27';   /* 界面上可见的版本号：更新后数字变了，说明新文件已生效 */
 const GUIDE = window.TOPIC_GUIDE || {};
 const CALC = window.CALC_GUIDE || {};
 const TASKS = D.tasks;
@@ -954,7 +954,8 @@ function renderTasks(){
   });
   const ws=weekState(), cursor=wpCursor(ws);
   const nV=WPTASKS.filter(t=>t.kind==='video').length, nG=WPTASKS.length-nV;
-  let html=`<div class="card wptip"><p class="hint">执行表主任务共 <b>${WPTASKS.length}</b> 项（${nV} 个视频 + ${nG} 次阶段测），按序号 <b>01 → ${wpSeq(WPTASKS.length)}</b> 推进：<b>前一项没打钩，后面全部锁住</b>。落下就停在原地继续那一项，不会随日历跳过去。当天的计算 / 错题随时做，不排先后。</p></div>`;
+  const nSkip=WPTASKS.filter(t=>wpTaskSkipped(t,ws)).length;
+  let html=`<div class="card wptip"><p class="hint">执行表主任务共 <b>${WPTASKS.length}</b> 项（${nV} 个视频 + ${nG} 次阶段测），按序号 <b>01 → ${wpSeq(WPTASKS.length)}</b> 排列。<b>不强制按顺序</b>：任何一项都能直接打钩或跳过，先学哪个由你定。暂时不想学的点「跳过」并写下原因，会标记 <b>⏭ 已延后</b>，当前建议项自动往后走；以后到「待补清单」里找回。${nSkip?`目前有 <b>${nSkip}</b> 项延后。`:''}当天的计算 / 错题随时做，不排先后。</p></div>`;
   WPSTAGES.forEach(st=>{
     if(sf&&sf!==st) return;
     const all=WPTASKS.filter(t=>t.stage===st);
@@ -964,55 +965,87 @@ function renderTasks(){
     const wks=WPW.filter(w=>w.stage===st);
     html+=`<div class="stage-head">${esc(st)}<small>第 ${wks[0].w}–${wks[wks.length-1].w} 周 ｜ ${dn}/${all.length} 已完成</small></div>`;
     list.forEach(t=>{
-      const d=wpTaskDone(t,ws), isCur=(t.no-1===cursor), lock=(t.no-1>cursor&&!d);
+      const d=wpTaskDone(t,ws), isCur=(t.no-1===cursor), sk=wpTaskSkipped(t,ws);
       const raw=t.kind==='video'?ws.done[t.key]:((ws.gate&&ws.gate[`W${pad2(t.w)}`]&&ws.gate[`W${pad2(t.w)}`].at)||ws.done[t.key]);
-      html+=`<div class="task-item ${d?'is-done':''} ${isCur?'is-current':''} ${lock?'is-locked':''}" data-action="wp-task" data-no="${t.no}">
-        <button class="tick" data-action="wp-toggle" data-no="${t.no}" ${lock?'disabled':''}>${d?'✓':(isCur?'▶':(lock?'🔒':'○'))}</button>
+      const skObj=sk?ws.skip[t.key]:null;
+      html+=`<div class="task-item ${d?'is-done':''} ${isCur?'is-current':''} ${sk?'is-skipped':''}" data-action="wp-task" data-no="${t.no}">
+        <button class="tick" data-action="wp-toggle" data-no="${t.no}">${d?'✓':(sk?'⏭':(isCur?'▶':'○'))}</button>
         <div class="body"><b>${wpSeq(t.no)}</b><span class="wk-pill ${t.kind==='gate'?'alt':''}">${t.kind==='gate'?'阶段测':'视频'}</span>
           <p>${esc(t.title)}</p>
-          <p class="ti-calc">第 ${t.w} 周 · ${esc(t.main||'').slice(0,52)}</p></div>
-        <div class="meta">${d?esc(String(raw||'').slice(5)):(isCur?'当前':(lock?'未解锁':''))}</div>
+          <p class="ti-calc">第 ${t.w} 周 · ${esc(t.main||'').slice(0,52)}</p>
+          ${sk?`<p class="ti-skip">⏭ 已延后${skObj&&skObj.reason?' · '+esc(skObj.reason):''}</p>`:''}</div>
+        <div class="meta">${d?esc(String(raw||'').slice(5)):(sk?'延后':(isCur?'建议当前':''))}</div>
       </div>`;
     });
   });
   $('#taskList').innerHTML=html||'<div class="card"><p class="hint">没有符合条件的任务。</p></div>';
 }
-/* 任务页交互：已完成项＝预览（不直接改）；当前项＝确认后才打钩推进 */
+/* 任务页交互：已完成＝预览；已跳过＝预览可恢复；其余＝任意顺序都能确认完成或跳过 */
 function wpToggleTask(no){
   const ws=weekState(), t=WPTASKS.find(x=>x.no===no); if(!t) return;
-  if(wpTaskDone(t,ws)){ wpOpenTask(no); return; }   /* 已完成：只预览，撤销要在详情里单独确认 */
-  const cursor=wpCursor(ws);
-  if((no-1)!==cursor){ toast('请先完成第 '+wpSeq(cursor+1)+' 项：'+((WPTASKS[cursor]||{}).title||'')); return; }
+  if(wpTaskDone(t,ws)||wpTaskSkipped(t,ws)){ wpOpenTask(no); return; }  /* 已完成/已跳过：只预览 */
   if(t.kind==='video'){ wpConfirmDone(no); return; }
   WK_VIEW=t.w; weekOpenGate();   /* 阶段测：去填达标率 */
 }
-/* 打钩前先给家长看清楚是哪一项，避免「只想测试」就推进 */
+/* 打钩前先给家长看清楚是哪一项，避免「只想测试」就推进；同时提供「先跳过」入口 */
 function wpConfirmDone(no){
   const ws=weekState(), t=WPTASKS.find(x=>x.no===no); if(!t) return;
-  if(wpTaskDone(t,ws)){ wpOpenTask(no); return; }
-  const cursor=wpCursor(ws);
-  if((no-1)!==cursor){ toast('请先完成第 '+wpSeq(cursor+1)+' 项：'+((WPTASKS[cursor]||{}).title||'')); return; }
+  if(wpTaskDone(t,ws)||wpTaskSkipped(t,ws)){ wpOpenTask(no); return; }
   const wk=wkAt(t.w)||{};
-  openSheet('确认完成第 '+wpSeq(no)+' 项？', `<div class="card">
-    <p class="hint"><b>点确认才会打钩并推进到下一项</b>；只是想看看的话点「取消」，进度不会变。</p>
+  openSheet('处理第 '+wpSeq(no)+' 项', `<div class="card">
+    <p class="hint">这一项没有先后限制，<b>现在做或先跳过都可以</b>。点确认才打钩；只是想看看点「返回」即可，进度不变。</p>
     <h3>${esc(t.title)}</h3>
     <p class="hint">${esc(t.stage)} · 第 ${t.w} 周 · ${t.kind==='gate'?'阶段达标测试':'培优A视频'}</p>
     ${wk.main?`<p class="hint">本周主线：${esc(wk.main)}</p>`:''}
-    <div class="btn-row"><button class="btn" data-action="wp-done-yes" data-no="${no}">✓ 确认完成，进入下一项</button>
-      <button class="btn ghost" data-action="close-sheet">取消，不改进度</button></div>
+    <div class="btn-row"><button class="btn" data-action="wp-done-yes" data-no="${no}">✓ 已完成，打钩</button>
+      <button class="btn ghost" data-action="wp-skip-open" data-no="${no}">⏭ 先跳过，写原因</button></div>
+    <div class="btn-row"><button class="btn ghost" data-action="close-sheet">返回，不改动</button></div>
   </div>`);
 }
-/* 真正确认打钩：只有这里写 ws.done */
+/* 真正确认打钩：只有这里写 ws.done；打钩同时清掉该项的延后标记 */
 function wpDoneYes(no){
   const ws=weekState(), t=WPTASKS.find(x=>x.no===no); if(!t) return;
   if(wpTaskDone(t,ws)){ closeSheet(); return; }
-  const cursor=wpCursor(ws);
-  if((no-1)!==cursor){ closeSheet(); toast('这一项还不是当前任务，未改动'); return; }
   if(t.kind==='video') ws.done[t.key]=activeDate();
   else { if(!ws.gate) ws.gate={}; ws.gate[`W${pad2(t.w)}`]={rate:100,passed:true,at:TODAY(),byParent:true}; ws.done[t.key]=activeDate(); }
+  if(ws.skip) delete ws.skip[t.key];
   WK_VIEW=null; save(); closeSheet(); renderAll();
   const nt=wpCurTask();
-  toast('✓ 第 '+wpSeq(no)+' 项完成'+(nt?('，下一项：第 '+wpSeq(nt.no)+' 项'):''));
+  toast('✓ 第 '+wpSeq(no)+' 项完成'+(nt?('，建议下一项：第 '+wpSeq(nt.no)+' 项'):''));
+}
+/* 跳过/延后：留原因，游标自动越过这一项 */
+function wpSkipOpen(no){
+  const t=WPTASKS.find(x=>x.no===no); if(!t) return;
+  const ws=weekState(), old=ws.skip&&ws.skip[t.key];
+  openSheet('跳过第 '+wpSeq(no)+' 项 · 写原因', `<div class="card">
+    <p class="hint">写一个以后看得懂的原因，比如「循环小数想等学完分数再学」。这项会标记 ⏭ 已延后，<b>不算完成</b>，当前建议项自动往后走；以后到「待补清单」一键找回。</p>
+    <h3>${esc(t.title)}</h3>
+    <label class="lbl">延后原因</label>
+    <textarea id="wskReason" rows="3" placeholder="例如：循环小数放一开始不合适，想学完整个分数后再进行">${esc(old&&old.reason||'')}</textarea>
+    <div class="btn-row"><button class="btn" data-action="wp-skip-save" data-no="${no}">⏭ 确认跳过</button>
+      <button class="btn ghost" data-action="close-sheet">取消</button></div>
+  </div>`);
+}
+function wpSkipSave(no){
+  const t=WPTASKS.find(x=>x.no===no); if(!t) return;
+  const ws=weekState(), el=$('#wskReason');
+  const reason=(el&&el.value||'').trim();
+  if(!reason){ toast('请写一下延后原因，方便以后找回'); if(el) el.focus(); return; }
+  if(!ws.skip) ws.skip={};
+  ws.skip[t.key]={reason, at:activeDate()};
+  if(ws.done) delete ws.done[t.key];
+  if(t.kind==='gate'&&ws.gate) delete ws.gate[`W${pad2(t.w)}`];
+  save(); closeSheet(); renderAll();
+  const nt=wpCurTask();
+  toast('⏭ 第 '+wpSeq(no)+' 项已延后'+(nt?('，建议下一项：第 '+wpSeq(nt.no)+' 项'):''));
+}
+/* 恢复待做：清掉延后标记，回到未完成池 */
+function wpUnskip(no){
+  const t=WPTASKS.find(x=>x.no===no); if(!t) return;
+  const ws=weekState();
+  if(ws.skip) delete ws.skip[t.key];
+  WK_VIEW=null; save(); closeSheet(); renderAll();
+  toast('第 '+wpSeq(no)+' 项已恢复，当前建议项回到这里');
 }
 function wpDoneRaw(t,ws){
   if(t.kind==='video') return ws.done[t.key];
@@ -1022,20 +1055,22 @@ function wpDoneRaw(t,ws){
 /* 任务详情：这里是「预览」，点开不会改任何进度；撤销要单独确认 */
 function wpOpenTask(no){
   const t=WPTASKS.find(x=>x.no===no); if(!t) return;
-  const ws=weekState(), wk=wkAt(t.w)||{}, d=wpTaskDone(t,ws), isCur=((no-1)===wpCursor(ws));
-  const raw=wpDoneRaw(t,ws);
+  const ws=weekState(), wk=wkAt(t.w)||{}, d=wpTaskDone(t,ws), sk=wpTaskSkipped(t,ws), isCur=((no-1)===wpCursor(ws));
+  const raw=wpDoneRaw(t,ws), skObj=sk?ws.skip[t.key]:null;
   openSheet('第 '+wpSeq(no)+' 项 · '+(t.kind==='gate'?'阶段测试':'视频'), `<div class="card">
     <p class="hint">${esc(t.stage)} · 第 ${t.w} 周 · 计划 ${esc(wk.start||'')} ~ ${esc(wk.end||'')}</p>
     <h3>${esc(t.title)}</h3>
     <p class="hint">本周主线：${esc(t.main||'')}</p>
     <p class="hint">本周计算：${(wk.calc||[]).map(c=>esc(calcName(c.tag))+' '+c.n+' 题').join('、')||'按每日保温'}</p>
     ${wk.backup?`<p class="hint">校内兜底：${esc(wk.backup)}</p>`:''}
-    <p class="hint">状态：${d?('✓ 已于 '+esc(String(raw||'').slice(0,16))+' 完成'):(isCur?'▶ 当前这项':'未完成（前面的项还没打钩）')}</p>
+    <p class="hint">状态：${d?('✓ 已于 '+esc(String(raw||'').slice(0,16))+' 完成'):(sk?('⏭ 已延后 · '+esc(skObj&&skObj.reason||'')+'（'+esc(String(skObj&&skObj.at||'').slice(5))+'）'):(isCur?'▶ 建议当前这项':'○ 待做'))}</p>
     <div class="btn-row">
       ${d?`<button class="btn ghost danger" data-action="wp-undo" data-no="${no}">撤销这一项的打钩</button>`
-        :(isCur?`<button class="btn" data-action="wp-toggle" data-no="${no}">打钩完成</button>`:'')}
+        :sk?`<button class="btn" data-action="wp-unskip" data-no="${no}">↩ 恢复为待做</button><button class="btn ghost" data-action="wp-skip-open" data-no="${no}">改延后原因</button>`
+        :`<button class="btn" data-action="wp-done-yes" data-no="${no}">✓ 打钩完成</button><button class="btn ghost" data-action="wp-skip-open" data-no="${no}">⏭ 先跳过</button>`}
       <button class="btn ghost" data-action="wp-view-week" data-v="${t.w}">看这一周执行表</button>
-      <button class="btn ghost" data-action="done-list">← 已完成清单</button></div>
+      <button class="btn ghost" data-action="done-list">← 已完成清单</button>
+      <button class="btn ghost" data-action="skip-list">待补清单</button></div>
   </div>`);
 }
 /* 已完成清单：家长预览 / 撤销已打钩的主任务 */
@@ -1044,7 +1079,7 @@ function openDoneList(){
   const done=WPTASKS.filter(t=>wpTaskDone(t,ws));
   if(!done.length){ toast('还没有已完成的主任务'); return; }
   openSheet('已完成的任务 · '+done.length+' 项', `<div class="card">
-    <p class="hint">下面都是已打钩的主任务。<b>预览</b>只是看详情，不会改动进度；<b>撤销</b>会取消打钩，当前任务回到这一项、后面的重新锁住。撤销只改完成记录，错题和计算记录都保留。</p>
+    <p class="hint">下面都是已打钩的主任务。<b>预览</b>只是看详情，不会改动进度；<b>撤销</b>会取消打钩，建议项回到这一项。撤销只改完成记录，错题和计算记录都保留。</p>
     <div class="done-list">${done.slice().reverse().map(t=>{
       const raw=wpDoneRaw(t,ws);
       return `<div class="done-item">
@@ -1057,13 +1092,32 @@ function openDoneList(){
     <div class="btn-row"><button class="btn ghost" data-action="close-sheet">关闭</button></div>
   </div>`);
 }
+/* 待补清单：所有「跳过/延后」的主任务，可按原因找回、恢复待做或直接完成 */
+function openSkipList(){
+  const ws=weekState();
+  const list=WPTASKS.filter(t=>wpTaskSkipped(t,ws));
+  if(!list.length){ toast('目前没有延后待补的任务'); return; }
+  openSheet('待补清单 · '+list.length+' 项延后', `<div class="card">
+    <p class="hint">这些是家长标记「暂时跳过」的项，按执行表顺序列出。<b>恢复待做</b>只取消延后标记、不改进的进度；<b>打钩完成</b>要先确认。原因都写在下面，回头一看就知道为什么留着。</p>
+    <div class="done-list">${list.map(t=>{
+      const s=ws.skip[t.key]||{};
+      return `<div class="done-item">
+        <div class="done-main"><b>${wpSeq(t.no)}</b><span class="wk-pill alt">延后</span> ${esc(t.title)}
+          <small>第 ${t.w} 周 · ${esc(String(s.at||'').slice(0,16))} 标记 · 原因：${esc(s.reason||'未填')}</small></div>
+        <div class="done-btns"><button class="btn tiny ghost" data-action="wp-preview" data-no="${t.no}">预览</button>
+          <button class="btn tiny ghost" data-action="wp-unskip" data-no="${t.no}">恢复待做</button></div>
+      </div>`;
+    }).join('')}</div>
+    <div class="btn-row"><button class="btn ghost" data-action="close-sheet">关闭</button></div>
+  </div>`);
+}
 function wpUndoTask(no){
   const t=WPTASKS.find(x=>x.no===no); if(!t) return;
   const ws=weekState(), raw=wpDoneRaw(t,ws);
   openSheet('撤销第 '+wpSeq(no)+' 项的完成？', `<div class="card">
     <h3>${esc(t.title)}</h3>
     <p class="hint">第 ${t.w} 周 · ${esc(t.stage)} · ${esc(String(raw||'').slice(0,16))} 完成</p>
-    <p class="hint">撤销后当前任务回到第 ${wpSeq(no)} 项，后面各项重新锁住。<b>错题、每日计算、达标率记录都不受影响</b>——只是家长在改完成标记，孩子学过的内容不会消失。</p>
+    <p class="hint">撤销后建议项回到第 ${wpSeq(no)} 项（不再强制按序，任一项仍可随时做）。<b>错题、每日计算、达标率记录都不受影响</b>——只是家长在改完成标记，孩子学过的内容不会消失。</p>
     <div class="btn-row"><button class="btn ghost danger" data-action="wp-undo-yes" data-no="${no}">✓ 确认撤销</button>
       <button class="btn ghost" data-action="done-list">返回，不改</button></div>
   </div>`);
@@ -1122,7 +1176,7 @@ function renderOverview(){
           return `<div class="ov-witem">
             <div class="ov-whead"><b>第 ${w.w} 周</b><span>${esc(w.start||'')} ~ ${esc(w.end||'')}</span><span>${wd}/${wt.length} 项</span>${w.test?'<span class="wk-pill alt">阶段测</span>':''}</div>
             <div class="ov-wmain">${esc(w.main||'')}</div>
-            <div class="ov-wtasks">${wt.length?wt.map(t=>`<button class="ov-wtask ${wpTaskDone(t,ws)?'done':''} ${((t.no-1)===cursor?'cur':'')}" data-action="wp-task" data-no="${t.no}"><em>${wpSeq(t.no)}</em>${esc((t.title||'').slice(0,36))}${((t.no-1)===cursor?' ← 当前':'')}</button>`).join(''):'<span class="hint">本周无新视频：计算 / 错题 / 阶段测</span>'}</div>
+            <div class="ov-wtasks">${wt.length?wt.map(t=>`<button class="ov-wtask ${wpTaskDone(t,ws)?'done':''} ${wpTaskSkipped(t,ws)?'skipped':''} ${((t.no-1)===cursor?'cur':'')}" data-action="wp-task" data-no="${t.no}"><em>${wpSeq(t.no)}</em>${esc((t.title||'').slice(0,36))}${wpTaskSkipped(t,ws)?' ⏭延后':((t.no-1)===cursor?' ← 建议':'')}</button>`).join(''):'<span class="hint">本周无新视频：计算 / 错题 / 阶段测</span>'}</div>
             <div class="ov-wcalc">计算：${(w.calc||[]).map(c=>esc(calcName(c.tag))+' '+c.n+'题').join('、')||'—'} ｜ 回炉：${esc((w.review||[]).join('、')||'—')}</div>
           </div>`;
         }).join('')}
@@ -1287,7 +1341,7 @@ function renderSettings(){
   updateSyncChip();
   updateStorageInfo();
 }
-function renderAll(){ renderWeek(); renderPath(); renderHome(); renderTasks(); renderOverview(); renderLibrary(); renderWrong(); renderSettings(); renderPlan(); maybeNotify(); hydrateImages(document); hydrateAttachments(document);
+function renderAll(){ renderWeek(); renderPath(); renderHome(); renderTasks(); renderReview(); renderOverview(); renderLibrary(); renderWrong(); renderSettings(); renderPlan(); maybeNotify(); hydrateImages(document); hydrateAttachments(document);
   const av=$('#appVer'); if(av) av.textContent=APP_VER;
 }
 
@@ -2658,6 +2712,25 @@ document.addEventListener('click',e=>{
     case 'wp-undo': wpUndoTask(parseInt(el.dataset.no,10)); break;
     case 'wp-undo-yes': wpUndoYes(parseInt(el.dataset.no,10)); break;
     case 'done-list': openDoneList(); break;
+    /* v25 跳过/延后 + 待补清单 */
+    case 'wp-skip-open': wpSkipOpen(parseInt(el.dataset.no,10)); break;
+    case 'wp-skip-save': wpSkipSave(parseInt(el.dataset.no,10)); break;
+    case 'wp-unskip': wpUnskip(parseInt(el.dataset.no,10)); break;
+    case 'skip-list': openSkipList(); break;
+    /* v26 回炉卡：独立打钩，与本周回炉同步 */
+    case 'task-card-tab': switchTaskCard(el.dataset.v); break;
+    case 'rv-toggle': rvToggle(parseInt(el.dataset.no,10)); break;
+    case 'rv-questions': rvQuestions(parseInt(el.dataset.no,10)); break;
+    case 'rv-done-yes': rvDoneYes(parseInt(el.dataset.no,10)); break;
+    case 'rv-preview': rvPreview(parseInt(el.dataset.no,10)); break;
+    case 'rv-undo': rvUndo(parseInt(el.dataset.no,10)); break;
+    case 'rv-undo-yes': rvUndoYes(parseInt(el.dataset.no,10)); break;
+    case 'rv-skip-open': rvSkipOpen(parseInt(el.dataset.no,10)); break;
+    case 'rv-skip-save': rvSkipSave(parseInt(el.dataset.no,10)); break;
+    case 'rv-unskip': rvUnskip(parseInt(el.dataset.no,10)); break;
+    case 'rv-done-list': rvDoneList(); break;
+    case 'rv-skip-list': rvSkipList(); break;
+    case 'rv-view-week': rvViewWeek(el.dataset.v); break;
     case 'clear-cache': clearCacheAndReload(); break;
     case 'open-wrong-browse': openWrongBrowse(); break;
     case 'wrong-browse': openWrongBrowse(); break;
@@ -2749,6 +2822,7 @@ document.addEventListener('change',e=>{
   if(t.id==='wuFFile'&&t.files[0]){ weekFilePicked(t.files[0]); t.value=''; return; }
   if(t.id==='wuFTopic'){ updateFileSeqHint(); return; }
   if(t.id==='taskStageFilter'||t.id==='taskStateFilter'){ renderTasks(); return; }
+  if(t.id==='rvRoundFilter'||t.id==='rvStateFilter'||t.id==='rvSort'){ renderReview(); return; }
   if(t.id==='inboxWrong'){ const w=$('#inboxReasonWrap'); if(w) w.classList.toggle('hidden',!t.checked); return; }
   if(t.id==='attachToWrong'){ const w=$('#attachReasonWrap'); if(w) w.classList.toggle('hidden',!t.checked); return; }
   if(t.id==='bfFrom'||t.id==='bfTo'){
@@ -2832,15 +2906,279 @@ function buildWPTasks(){
 }
 const WPTASKS=buildWPTasks();
 const WPSTAGES=[...new Set(WPW.map(w=>w.stage))];
+
+/* ==================== v26 · 回炉卡 ====================
+   回炉专题按执行表 94 周顺序单独成卡；与「本周打卡 → 回炉专题」共用 ws.done['W##/review']，
+   所以两张卡打钩同步。延后记在 ws.skip['W##/review']，不占主任务序列。 */
+function rvRoundOf(name){
+  if(/三轮/.test(name)) return '三轮';
+  if(/二轮/.test(name)) return '二轮';
+  if(/收口/.test(name)) return '收口';
+  return '一轮';
+}
+function rvTopicOf(name){
+  /* 只去掉末尾的「（一轮）/（二轮）/（三轮·重点）/（收口）」，保留（倒推）等说明 */
+  return String(name||'').replace(/（[^）]*(一轮|二轮|三轮·重点|收口)[^）]*）$/,'').trim();
+}
+function buildReviewTasks(){
+  const list=[];
+  WPW.forEach(w=>{
+    /* 大部分周 1 个专题；W94 是同一句话被拆成两段，拼回去 */
+    const raw=(w.review||[]).filter(Boolean).join('');
+    if(!raw) return;
+    const round=rvRoundOf(raw);
+    const topic=rvTopicOf(raw);
+    list.push({ no:list.length+1, w:w.w, key:`W${pad2(w.w)}/review`,
+                title:topic, round, stage:w.stage,
+                start:w.start, due:w.end, how:w.reviewHow||'' });
+  });
+  return list;
+}
+const RVTASKS=buildReviewTasks();
+
+/* 回炉专题里 GUIDE 没覆盖的几项，补上「是什么 + 典型例题」，保证每一项都能看懂题意 */
+const RV_EXTRA={
+  '移多补少':{intro:'从多的一边拿一些给少的一边，两边就一样多；拿走 1 个，差距缩小 2 个。',
+    signal:'看到「从第一行拿几个到第二行，两行就一样多」就是移多补少。',
+    examples:[
+      {q:'第一行有 14 个球，第二行有 8 个球。从第一行拿几个到第二行，两行就一样多？',
+       sol:['两行相差 14 − 8 = 6 个。','移 1 个差距缩小 2 个，所以要移 6 ÷ 2 = 3 个。','验算：14 − 3 = 11，8 + 3 = 11。'],ans:'3 个'},
+      {q:'甲筐苹果比乙筐多 12 千克，从甲筐拿出多少千克给乙筐，两筐一样重？',
+       sol:['相差 12 千克，移 1 千克缩小 2 千克。','12 ÷ 2 = 6 千克。'],ans:'6 千克'}]},
+  '消元问题':{intro:'两个未知量给你两条合起来的条件，把其中一条翻一倍或相减，先消掉一个量，再求另一个。',
+    signal:'看到「3 个苹果加 2 个梨共 23 元，1 个苹果加 2 个梨共 12 元」就是消元。',
+    examples:[
+      {q:'买 3 个苹果和 2 个梨共 24 元，买 1 个苹果和 2 个梨共 12 元。苹果、梨每个各多少元？',
+       sol:['两次都买了 2 个梨，相减就消掉梨：3 苹 − 1 苹 = 2 苹。','价钱差 24 − 12 = 12 元，所以 2 个苹果 12 元，苹果 = 6 元。','代回第二句：2 个梨 = 12 − 6 = 6 元，梨 = 3 元。','验算第一句：3 × 6 + 2 × 3 = 24 元，对上了。'],ans:'苹果 6 元，梨 3 元'},
+      {q:'3 支笔和 2 本本子共 23 元，1 支笔和 2 本本子共 13 元。笔和本子各多少元？',
+       sol:['相减：2 支笔 = 23 − 13 = 10 元，笔 = 5 元。','代回：2 本本子 = 13 − 5 = 8 元，本子 = 4 元。'],ans:'笔 5 元，本子 4 元'}]},
+  '锯木头/剪绳子':{intro:'锯成 n 段只要锯 n−1 次；先算锯了几次，再乘每次用的时间。剪绳子同理。',
+    signal:'看到「锯成 5 段用了 20 分钟，锯成 8 段要多久」就是间隔问题。',
+    examples:[
+      {q:'把一根木头锯成 5 段用了 20 分钟，照这样锯成 8 段要多少分钟？',
+       sol:['锯成 5 段要锯 5 − 1 = 4 次。','每次用 20 ÷ 4 = 5 分钟。','锯成 8 段要锯 8 − 1 = 7 次，7 × 5 = 35 分钟。'],ans:'35 分钟'},
+      {q:'一根绳子剪了 4 次，剪成的每段都是 3 米。这根绳子原来长多少米？',
+       sol:['剪 4 次得到 4 + 1 = 5 段。','5 × 3 = 15 米。'],ans:'15 米'}]},
+  '小学遗留错题（保温不占主线）':{intro:'收口周不学新专题：把小学阶段还留在错题库里的题整体过一遍，连对 2 次的才算真正掌握。',
+    signal:'这一项没有固定题型，下面「孩子在册错题」就是这一周要重做的全部内容。',
+    examples:[]}
+};
+/* 回炉专题 → 专题讲解（是什么/识别信号/典型例题）：先用已有专题库，缺的用补充库 */
+function rvGuideOf(t){
+  const key=REVIEW_ALIAS[t.title]||t.title;
+  const g=(GUIDE&&GUIDE[key])||null;
+  if(g&&g.examples&&g.examples.length) return g;
+  return RV_EXTRA[t.title]||RV_EXTRA[key]||g;
+}
+/* 这个专题下家长已经上传、还在册的错题（线下要重做的就是这些） */
+function rvMistakesOf(t){
+  return (S.mistakes||[]).filter(m=>m.status==='active'&&(
+    topicMatch(topicTagOf(m),t.title)||topicMatch(m.tag||'',t.title)));
+}
+function rvQuestionsHTML(t){
+  const g=rvGuideOf(t)||{}, ex=(g.examples||[]).slice(0,3);
+  const ms=rvMistakesOf(t).slice(0,8);
+  return `<div class="rv-qbox">
+    ${g.intro?`<p class="rv-what"><b>这道题是什么意思：</b>${esc(g.intro)}</p>`:''}
+    ${g.signal?`<p class="rv-what"><b>怎么认出它：</b>${esc(g.signal)}</p>`:''}
+    ${ex.length?`<h4>典型例题（先看题意，再线下做）</h4>${ex.map((e,i)=>`<div class="rv-ex">
+      <div class="rv-ex-q"><b>例 ${i+1}</b> ${esc(e.q)}</div>
+      <details class="rv-ex-d"><summary>看解法 / 答案</summary>
+        <div class="rv-ex-sol">${(e.sol||[]).map(s=>'<p>· '+esc(s)+'</p>').join('')}</div>
+        <p class="rv-ex-ans">答案：${esc(e.ans||'')}</p></details>
+    </div>`).join('')}`:''}
+    <h4>孩子这个专题的在册错题（线下重做）</h4>
+    ${ms.length?ms.map(m=>`<div class="rv-ex"><div class="rv-ex-q">${mistakeRef(m)}<small>${esc(topicTagOf(m))} · ${esc(m.date||'')}</small></div>
+      <button class="linkbtn" data-action="view-wrong" data-id="${esc(m.id)}">查看这道题 ›</button></div>`).join('')
+      :'<p class="hint">还没有上传这个专题的错题。做这道典型例题即可；孩子这周做错后，到周末把题传上来。</p>'}
+  </div>`;
+}
+function rvQuestions(no){
+  const t=RVTASKS.find(x=>x.no===no); if(!t) return;
+  openSheet('第 '+wpSeq(no)+' 项 · '+t.title+' · 看题目', `<div class="card">
+    <p class="hint">${esc(t.stage)} · 第 ${t.w} 周 · 建议 ${esc(t.due)} 前完成 · ${t.round==='三轮'?'三轮·重点':t.round}</p>
+    ${rvQuestionsHTML(t)}
+    <div class="btn-row"><button class="btn" data-action="rv-toggle" data-no="${no}">✓ 做完了，去打钩</button>
+      <button class="btn ghost" data-action="rv-view-week" data-v="${t.w}">看这一周执行表</button></div>
+  </div>`);
+}
+function rvDone(t,ws){ return !!(t&&ws.done[t.key]); }
+function rvSkipped(t,ws){ return !!(t&&ws.skip&&ws.skip[t.key]); }
+function rvDoneRaw(t,ws){ return t?ws.done[t.key]:null; }
+let TASK_CARD='task';
+function switchTaskCard(v){
+  TASK_CARD=(v==='review')?'review':'task';
+  const a=$('#taskCardPane'), b=$('#reviewCardPane');
+  if(a) a.classList.toggle('hidden',TASK_CARD!=='task');
+  if(b) b.classList.toggle('hidden',TASK_CARD!=='review');
+  $$('#taskCardSwitch .cs-b').forEach(x=>x.classList.toggle('on',x.dataset.v===TASK_CARD));
+  if(TASK_CARD==='review') renderReview();
+}
+/* 回炉卡：按序号 / 建议完成日排序，按轮次 / 状态筛选 */
+function renderReview(){
+  const root=$('#reviewList'); if(!root) return;
+  const ws=weekState();
+  const rf=$('#rvRoundFilter'), sf=$('#rvStateFilter'), so=$('#rvSort');
+  if(rf&&rf.options.length===1) [...new Set(RVTASKS.map(t=>t.round))].forEach(r=>rf.add(new Option(r,r)));
+  const fr=rf?rf.value:'', fs=sf?sf.value:'', sort=so?so.value:'seq';
+  const doneN=RVTASKS.filter(t=>rvDone(t,ws)).length;
+  const skipN=RVTASKS.filter(t=>rvSkipped(t,ws)).length;
+  const sm=$('#rvSummary');
+  if(sm) sm.innerHTML=`<span>回炉专题 <b>${RVTASKS.length}</b></span><span>已打钩 <b>${doneN}</b></span><span>已跳过 <b>${skipN}</b></span><span>完成率 <b>${RVTASKS.length?Math.round(doneN/RVTASKS.length*100):0}%</b></span>`;
+  let list=RVTASKS.filter(t=>(!fr||t.round===fr)&&(!fs||
+      (fs==='done'?rvDone(t,ws):fs==='skip'?rvSkipped(t,ws):!rvDone(t,ws)&&!rvSkipped(t,ws))));
+  if(sort==='dueAsc') list=list.slice().sort((a,b)=>a.due.localeCompare(b.due));
+  else if(sort==='dueDesc') list=list.slice().sort((a,b)=>b.due.localeCompare(a.due));
+  else list=list.slice().sort((a,b)=>a.no-b.no);
+  if(!list.length){ root.innerHTML='<div class="card"><p class="hint">这个筛选下没有回炉专题，换个轮次或状态看看。</p></div>'; return; }
+  root.innerHTML=list.map(t=>{
+    const d=rvDone(t,ws), sk=rvSkipped(t,ws), skObj=sk?ws.skip[t.key]:null;
+    const overdue=!d&&!sk&&t.due<TODAY();
+    const guide=rvGuideOf(t)||{}, ex=(guide.examples||[])[0];
+    const msN=rvMistakesOf(t).length;
+    return `<div class="task-item rv-item ${d?'is-done':''} ${sk?'is-skipped':''}" data-action="rv-preview" data-no="${t.no}">
+      <button class="tick" data-action="rv-toggle" data-no="${t.no}">${d?'✓':(sk?'⏭':'○')}</button>
+      <div class="body"><b>${wpSeq(t.no)}</b><span class="wk-pill ${t.round==='一轮'?'':'alt'}">${t.round==='三轮'?'三轮·重点':t.round}</span>
+        <p>${esc(t.title)}</p>
+        <p class="ti-calc">第 ${t.w} 周 · 建议 ${esc(cnDate(t.due))} 前完成 · ${esc(t.stage)}</p>
+        ${ex?`<p class="ti-ex">例：${esc(clip(ex.q,52))}</p>`:''}
+        <button class="linkbtn rv-qbtn" data-action="rv-questions" data-no="${t.no}">看题目 / 题意${msN?' · '+msN+' 道在册错题':''} ›</button>
+        ${sk?`<p class="ti-skip">⏭ 已跳过${skObj&&skObj.reason?' · '+esc(skObj.reason):''}</p>`:''}
+        ${overdue?`<p class="ti-late">⚠ 已过建议日，尽快补做</p>`:''}</div>
+      <div class="meta">${d?esc(String(rvDoneRaw(t,ws)||'').slice(5)):(sk?'跳过':'')}</div>
+    </div>`;
+  }).join('');
+}
+/* 回炉卡交互：打钩先确认；已完成/已跳过＝只预览；撤销单独确认 */
+function rvToggle(no){
+  const t=RVTASKS.find(x=>x.no===no); if(!t) return;
+  const ws=weekState();
+  if(rvDone(t,ws)||rvSkipped(t,ws)){ rvPreview(no); return; }
+  const wk=wkAt(t.w)||{};
+  openSheet('回炉卡 · 第 '+wpSeq(no)+' 项', `<div class="card">
+    <p class="hint">回炉＝<b>只做当时错过的题，不看视频</b>；原题重做 → 同类变式 2–3 题 → 全对才打钩。这里打钩会同步到「本周打卡 → 回炉专题」。</p>
+    <h3>${esc(t.title)}</h3>
+    <p class="hint">${esc(t.stage)} · 第 ${t.w} 周 · 建议 ${esc(t.due)} 前完成</p>
+    ${wk.main?`<p class="hint">本周主线：${esc(wk.main)}</p>`:''}
+    ${t.how?`<p class="hint">做法：${esc(t.how)}</p>`:''}
+    ${rvQuestionsHTML(t)}
+    <div class="btn-row"><button class="btn" data-action="rv-done-yes" data-no="${no}">✓ 全对了，打钩</button>
+      <button class="btn ghost" data-action="rv-skip-open" data-no="${no}">⏭ 先跳过，写原因</button></div>
+    <div class="btn-row"><button class="btn ghost" data-action="close-sheet">返回，不改动</button></div>
+  </div>`);
+}
+function rvDoneYes(no){
+  const t=RVTASKS.find(x=>x.no===no); if(!t) return;
+  const ws=weekState();
+  ws.done[t.key]=activeDate();
+  if(ws.skip) delete ws.skip[t.key];
+  save(); closeSheet(); renderAll();
+  toast('✓ 回炉第 '+wpSeq(no)+' 项已打钩');
+}
+function rvPreview(no){
+  const t=RVTASKS.find(x=>x.no===no); if(!t) return;
+  const ws=weekState(), d=rvDone(t,ws), sk=rvSkipped(t,ws), raw=rvDoneRaw(t,ws), skObj=sk?ws.skip[t.key]:null;
+  openSheet('回炉第 '+wpSeq(no)+' 项 · '+(d?'已完成':(sk?'已跳过':'待做')), `<div class="card">
+    <h3>${esc(t.title)}</h3>
+    <p class="hint">${esc(t.stage)} · 第 ${t.w} 周 · 建议 ${esc(t.due)} 前完成</p>
+    <p class="hint">状态：${d?('✓ 已于 '+esc(String(raw||'').slice(0,16))+' 打钩'):(sk?('⏭ 已跳过 · '+esc(skObj&&skObj.reason||'')+'（'+esc(String(skObj&&skObj.at||'').slice(5))+'）'):'○ 待做')}</p>
+    ${rvQuestionsHTML(t)}
+    <div class="btn-row">
+      ${d?`<button class="btn ghost danger" data-action="rv-undo" data-no="${no}">撤销打钩</button>`
+        :sk?`<button class="btn" data-action="rv-unskip" data-no="${no}">↩ 恢复待做</button><button class="btn ghost" data-action="rv-skip-open" data-no="${no}">改跳过原因</button>`
+        :`<button class="btn" data-action="rv-done-yes" data-no="${no}">✓ 打钩完成</button><button class="btn ghost" data-action="rv-skip-open" data-no="${no}">⏭ 先跳过</button>`}
+      <button class="btn ghost" data-action="rv-view-week" data-v="${t.w}">看这一周执行表</button></div>
+    <div class="btn-row"><button class="btn ghost" data-action="rv-done-list">已打钩清单</button>
+      <button class="btn ghost" data-action="rv-skip-list">待补清单</button></div>
+  </div>`);
+}
+function rvUndo(no){
+  const t=RVTASKS.find(x=>x.no===no); if(!t) return;
+  const raw=rvDoneRaw(t,weekState());
+  openSheet('撤销回炉第 '+wpSeq(no)+' 项的打钩？', `<div class="card">
+    <h3>${esc(t.title)}</h3><p class="hint">第 ${t.w} 周 · ${esc(t.stage)} · ${esc(String(raw||'').slice(0,16))} 打钩</p>
+    <p class="hint">撤销只改这一项的回炉打钩，<b>不影响视频完成、错题上传和每日计算记录</b>。本周打卡里同一项的回炉打钩也会一起取消。</p>
+    <div class="btn-row"><button class="btn ghost danger" data-action="rv-undo-yes" data-no="${no}">✓ 确认撤销</button>
+      <button class="btn ghost" data-action="rv-done-list">返回，不改</button></div>
+  </div>`);
+}
+function rvUndoYes(no){
+  const t=RVTASKS.find(x=>x.no===no); if(!t) return;
+  const ws=weekState(); delete ws.done[t.key];
+  save(); renderAll(); toast('已撤销回炉第 '+wpSeq(no)+' 项'); rvDoneList();
+}
+function rvSkipOpen(no){
+  const t=RVTASKS.find(x=>x.no===no); if(!t) return;
+  const ws=weekState(), old=ws.skip&&ws.skip[t.key];
+  openSheet('跳过回炉第 '+wpSeq(no)+' 项 · 写原因', `<div class="card">
+    <p class="hint">写一个以后看得懂的原因，比如「这块题太少，等错了再回来做」。标 ⏭ 跳过，<b>不算打钩</b>，之后到「待补清单」一键找回。</p>
+    <h3>${esc(t.title)}</h3>
+    <label class="lbl">跳过原因</label>
+    <textarea id="rvReason" rows="3" placeholder="例如：目前没有在册错题，等孩子错了再回来补">${esc(old&&old.reason||'')}</textarea>
+    <div class="btn-row"><button class="btn" data-action="rv-skip-save" data-no="${no}">⏭ 确认跳过</button>
+      <button class="btn ghost" data-action="close-sheet">取消</button></div>
+  </div>`);
+}
+function rvSkipSave(no){
+  const t=RVTASKS.find(x=>x.no===no); if(!t) return;
+  const ws=weekState(), el=$('#rvReason'), reason=(el&&el.value||'').trim();
+  if(!reason){ toast('请写一下跳过原因，方便以后找回'); if(el) el.focus(); return; }
+  if(!ws.skip) ws.skip={};
+  ws.skip[t.key]={reason,at:activeDate()};
+  delete ws.done[t.key];
+  save(); closeSheet(); renderAll(); toast('⏭ 回炉第 '+wpSeq(no)+' 项已跳过');
+}
+function rvUnskip(no){
+  const t=RVTASKS.find(x=>x.no===no); if(!t) return;
+  const ws=weekState(); if(ws.skip) delete ws.skip[t.key];
+  save(); closeSheet(); renderAll(); toast('回炉第 '+wpSeq(no)+' 项已恢复为待做');
+}
+function rvDoneList(){
+  const ws=weekState(), list=RVTASKS.filter(t=>rvDone(t,ws));
+  if(!list.length){ toast('回炉卡还没有打钩的专题'); return; }
+  openSheet('回炉 · 已打钩 '+list.length+' 项', `<div class="card">
+    <p class="hint">点「撤销」只改回炉打钩，不动其它记录。</p>
+    <div class="done-list">${list.slice().reverse().map(t=>`<div class="done-item">
+      <div class="done-main"><b>${wpSeq(t.no)}</b><span class="wk-pill">${t.round==='三轮'?'三轮·重点':t.round}</span> ${esc(t.title)}
+        <small>第 ${t.w} 周 · ${esc(String(rvDoneRaw(t,ws)||'').slice(0,16))} 打钩</small></div>
+      <div class="done-btns"><button class="btn tiny ghost" data-action="rv-undo" data-no="${t.no}">撤销</button></div>
+    </div>`).join('')}</div>
+    <div class="btn-row"><button class="btn ghost" data-action="close-sheet">关闭</button></div>
+  </div>`);
+}
+function rvSkipList(){
+  const ws=weekState(), list=RVTASKS.filter(t=>rvSkipped(t,ws));
+  if(!list.length){ toast('回炉卡没有跳过的专题'); return; }
+  openSheet('回炉 · 待补 '+list.length+' 项', `<div class="card">
+    <p class="hint">这些是跳过的回炉专题，按执行表顺序列出。恢复待做后仍在回炉卡里，随时能打钩。</p>
+    <div class="done-list">${list.map(t=>{ const s=ws.skip[t.key]||{}; return `<div class="done-item">
+      <div class="done-main"><b>${wpSeq(t.no)}</b><span class="wk-pill alt">跳过</span> ${esc(t.title)}
+        <small>第 ${t.w} 周 · ${esc(String(s.at||'').slice(0,16))} 标记 · 原因：${esc(s.reason||'未填')}</small></div>
+      <div class="done-btns"><button class="btn tiny ghost" data-action="rv-unskip" data-no="${t.no}">恢复待做</button></div>
+    </div>`; }).join('')}</div>
+    <div class="btn-row"><button class="btn ghost" data-action="close-sheet">关闭</button></div>
+  </div>`);
+}
+function rvViewWeek(v){ wpViewWeek(v); switchTaskCard('review'); }
+
 function wpTaskDone(t,ws){
   if(!t) return false;
   if(t.kind==='video') return !!ws.done[t.key];
   const g=ws.gate&&ws.gate[`W${pad2(t.w)}`];
   return !!(g&&g.passed) || !!ws.done[t.key];
 }
-/* 当前卡在第几项（0-based 下标）；返回 length 表示全部完成 */
+/* v25：跳过/延后。跳过项记为 ws.skip[key]={reason,at}，不算完成，但游标会越过它。 */
+function wpTaskSkipped(t,ws){
+  if(!t) return false;
+  return !!(ws.skip && ws.skip[t.key]);
+}
+/* 当前建议项（0-based 下标）：跳过「已完成」和「已延后」的，落在第一个还没处理过的。
+   返回 length 表示全部处理完。仅作导航提示，不锁任何项——任意项随时可点、可打钩、可跳过。 */
 function wpCursor(ws){
-  for(let i=0;i<WPTASKS.length;i++) if(!wpTaskDone(WPTASKS[i],ws)) return i;
+  for(let i=0;i<WPTASKS.length;i++){
+    const t=WPTASKS[i];
+    if(!wpTaskDone(t,ws) && !wpTaskSkipped(t,ws)) return i;
+  }
   return WPTASKS.length;
 }
 function wpCurTask(){ const ws=weekState(),i=wpCursor(ws); return i<WPTASKS.length?WPTASKS[i]:null; }
@@ -2851,9 +3189,9 @@ let WK_VIEW=null;
 function wkViewWeek(){ const w=WK_VIEW; return (w>=1&&w<=WPW.length)?w:wpCurWeek(); }
 
 function weekState(){
-  if(!S.week || typeof S.week!=='object') S.week={ cur:1, done:{}, calc:{}, gate:{} };
+  if(!S.week || typeof S.week!=='object') S.week={ cur:1, done:{}, calc:{}, gate:{}, skip:{} };
   const w=S.week;
-  if(!w.done) w.done={}; if(!w.calc) w.calc={}; if(!w.gate) w.gate={};
+  if(!w.done) w.done={}; if(!w.calc) w.calc={}; if(!w.gate) w.gate={}; if(!w.skip) w.skip={};
   if(!(w.cur>=1&&w.cur<=94)) w.cur=1;
   return w;
 }
@@ -3011,15 +3349,17 @@ function renderWeek(){
   const fc=weekForecast();
   const strong=fc.etaDrift>14?'落后':(fc.etaDrift<-14?'领先':'正常');
 
-  /* 当前任务（全局序号）。落后就停在这项，不会跳到日历上「今天该做」的那项 */
+  /* 建议当前项（全局序号）：越过已完成和已延后的；不锁任何项 */
   const doneN=WPTASKS.filter(t=>wpTaskDone(t,ws)).length;
+  const skipN=WPTASKS.filter(t=>wpTaskSkipped(t,ws)).length;
   let html=`<div class="wk-cur">
-    <div class="wkc-main"><span class="wkc-tag">当前任务 · 第 ${ct?wpSeq(ct.no)+' / '+WPTASKS.length:'✓'} 项</span>
-      <b>${ct?esc(ct.title):'执行表主任务已全部完成，可进入初中衔接'}</b>
-      <small>${ct?`第 ${ct.w} 周 · ${esc(ct.stage)} · ${ct.kind==='gate'?'阶段达标测试':'培优A视频'}`:''}</small></div>
+    <div class="wkc-main"><span class="wkc-tag">建议当前 · 第 ${ct?wpSeq(ct.no)+' / '+WPTASKS.length:'✓'} 项${skipN?' · '+skipN+' 项已延后':''}</span>
+      <b>${ct?esc(ct.title):'执行表主任务已全部处理，可进入初中衔接'}</b>
+      <small>${ct?`第 ${ct.w} 周 · ${esc(ct.stage)} · ${ct.kind==='gate'?'阶段达标测试':'培优A视频'} · 不强制顺序，任一项都能点`:''}</small></div>
     <div class="wkc-acts">
+      ${skipN?`<button class="btn tiny ghost" data-action="skip-list">待补 ${skipN} 项 · 查看</button>`:''}
       ${doneN?`<button class="btn tiny ghost" data-action="done-list">已完成 ${doneN} 项 · 查看/撤销</button>`:''}
-      ${ct?`<button class="btn tiny ghost" data-action="week-unlock">家长确认已完成</button>`:''}
+      ${ct?`<button class="btn tiny ghost" data-action="week-unlock">处理建议项</button>`:''}
     </div>
   </div>`;
   if(WK_VIEW && w!==wpCurWeek()) html+=`<div class="wk-viewnote">正在查看第 ${w} 周（不影响任务进度）<button class="btn tiny ghost" data-action="week-cur">回到当前任务 ${ct?wpSeq(ct.no):''} ›</button></div>`;
@@ -3041,14 +3381,14 @@ function renderWeek(){
 
   const wd=doneN;
   html+=`<div class="wk-bar"><div class="wk-bar-in" style="width:${Math.round(wd/WPTASKS.length*100)}%"></div></div>
-    <div class="wk-bar-note">主任务 ${wd}/${WPTASKS.length} 项完成 · 当前第 ${ct?wpSeq(ct.no):'—'} 项 · ${strong==='落后'?'⚠ 落后较多，建议压缩选做奥数周、利用假期补回':(strong==='领先'?'✅ 领先计划，可按节奏放缓或提前启动初中预热':'节奏正常，按序号推进即可')}</div>`;
+    <div class="wk-bar-note">主任务 ${wd}/${WPTASKS.length} 项完成${skipN?' · '+skipN+' 项延后待补':''} · 建议第 ${ct?wpSeq(ct.no):'—'} 项 · 不强制顺序，任意项随时可做</div>`;
 
   // 当天三类任务互不锁：视频按全局序号，计算/错题随时可做
   const ss=weekSteps(w);
   html+=`<div class="wk-steps">`;
   ss.forEach((st,idx)=>{
     const done=stepDone(ws,w,st);
-    const tip=st.kind==='video'?'按序号':(done?'已完成':'随时可做');
+    const tip=st.kind==='video'?'不限序':(done?'已完成':'随时可做');
     html+=`<div class="wk-step ${done?'done':'now'}" id="wks-${st.kind}">
       <div class="wk-step-h"><span class="wk-step-i">${done?'✓':''}</span>
         <b>${esc(st.label)}</b><em class="${done?'':'hot'}">${tip}</em></div>
@@ -3063,7 +3403,7 @@ function renderWeek(){
     <button class="btn ghost" data-action="week-next" ${w>=94?'disabled':''}>看下一周 ›</button>
     <button class="btn ghost" data-action="week-jump">跳到指定周</button>
   </div>`;
-  html+=`<div class="wk-foot">主视频按执行表序号推进：第 ${ct?wpSeq(ct.no):'—'} 项没完成，后面各项都锁着，落下也不会跳过。当天先看视频、先做计算、还是先清错题，随你。计划的日期只是基准；打钩的实际时间单独记录，用来算偏离和预计完成日。</div>`;
+  html+=`<div class="wk-foot">执行表序号只是建议顺序，<b>不强制</b>：第 ${ct?wpSeq(ct.no):'—'} 项是还没处理的建议项，你也可以先做后面任何一讲；暂时不想学的点那一项「先跳过」写原因，标 ⏭ 留待补。当天先看视频、先做计算、还是先清错题，随你。计划的日期只是基准；打钩的实际时间单独记录，用来算偏离和预计完成日。</div>`;
 
   root.innerHTML=html;
 }
@@ -3079,14 +3419,15 @@ function weekStepBody(w,st,unlocked,done){
     return `<div class="wk-vlist">${vids.map((v,i)=>{
         const key=`W${pad2(w)}/v${i}`, d=ws.done[key];
         const task=WPTASKS.find(t=>t.key===key), no=task?task.no:null;
-        const locked=!!no&&!d&&(no-1)!==cursor, isCur=!!no&&(no-1)===cursor;
-        return `<div class="wk-vitem ${d?'ok':''} ${locked?'locked':''} ${isCur?'iscur':''}">
-          <button class="wk-check" data-action="week-video" data-id="${no||i}" ${locked?'disabled':''}>${d?'✓':(locked?'🔒':'○')}</button>
+        const sk=task?wpTaskSkipped(task,ws):false, skObj=sk?ws.skip[key]:null;
+        const isCur=!!no&&(no-1)===cursor;
+        return `<div class="wk-vitem ${d?'ok':''} ${sk?'skipped':''} ${isCur?'iscur':''}">
+          <button class="wk-check" data-action="week-video" data-id="${no||i}">${d?'✓':(sk?'⏭':'○')}</button>
           <span>${no?`<em class="wk-no">${wpSeq(no)}</em>`:''}${esc(v.t)}</span>
-          ${d?`<small>${esc(cnDate(d))} 完成</small>`:(locked?'<small>先完成前一项</small>':(isCur?'<small class="hot">← 当前这项</small>':''))}</div>`;
+          ${d?`<small>${esc(cnDate(d))} 完成</small>`:(sk?`<small>已延后 · ${esc(skObj&&skObj.reason||'')}</small>`:(isCur?'<small class="hot">← 建议这项</small>':''))}</div>`;
       }).join('')}</div>
       ${wk.backup?`<p class="hint">卡住时才看的校内同步备选：${esc(wk.backup)}</p>`:''}
-      <p class="hint">按序号看：前一项没打钩，后面都锁着；落下就继续当前这项，不会跳过去。看完让孩子用 1 句话复述讲了什么。已学过又做错的回炉专题直接做错题，不用重看整讲。</p>`;
+      <p class="hint">序号只是执行表顺序，<b>不强制</b>：先学哪讲、要不要跳过都由你定。不想现在学的点那一项选「先跳过」并写原因，会标 ⏭，建议项自动往后走。看完让孩子用 1 句话复述讲了什么。已学过又做错的回炉专题直接做错题，不用重看整讲。</p>`;
   }
   if(st.kind==='calc'){
     const days=[];
