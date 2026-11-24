@@ -1,5 +1,5 @@
 /* 数学学习工作台 · 离线缓存（仅 http/https 生效；file:// 直接打开时自动跳过） */
-const CACHE = 'mxwb-v33';
+const CACHE = 'mxwb-v34';
 const FILES = [
   './', './index.html', './styles.css', './data.js', './weekplan.js', './path.js', './topics.js', './calcguide.js', './classify.js', './variants.js', './calendar.js', './sync.js', './app.js',
   './icon.svg', './icon-192.png', './icon-512.png', './manifest.webmanifest', './study-plan.html'
