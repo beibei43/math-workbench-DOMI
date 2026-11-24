@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon.svg">
-<link rel="stylesheet" href="styles.css?v27">
+<link rel="stylesheet" href="styles.css?v31">
 </head>
 <body>
 
@@ -23,7 +23,7 @@
 
   <!-- ========== 本周打卡（v20 默认页 · 94 周主线 · 串行推送 + 计划/实际偏离） ========== -->
   <section class="page active" id="page-week">
-    <div class="page-head"><h2>本周打卡 · 94 周执行表</h2><p><b>这是给家长记录用的工作台</b>，孩子不在这里做题。本周固定四项：① 本周视频（按执行表序号排列，但<b>不强制顺序</b>，想先看哪讲、想跳过哪讲都行，跳过的写原因留待补）② 每日计算（线下买题做，只记录内容+打钩，不出题不判分）③ 回炉专题（每周一个，做当时的错题，不看视频）④ 周末错题上传（单题拍照或整份文件，自动按专题编号）。四类互不锁；周末还会按 1/3/7 天提醒要复习的旧错题。<b>打钩前先弹确认，误点「取消」进度不变；已完成的可在顶部「已完成 N 项」预览/撤销，跳过延后的在「待补 N 项」里找回。</b></p></div>
+    <div class="page-head"><h2>本周打卡 · 94 周执行表</h2><p><b>这是给家长记录用的工作台</b>，孩子不在这里做题。本周固定四项：① 本周视频（按执行表序号排列，但<b>不强制顺序</b>，想先看哪讲、想跳过哪讲都行，跳过的写原因留待补）② 本周计算（线下买计算本，每天做 2 页，只提示这周做哪类+按周打钩）③ 回炉专题（每周一个，做当时的错题，不看视频）④ 周末错题上传（单题拍照或整份文件，自动按专题编号）。四类互不锁；周末还会按第 1/2/4 周的节奏提醒要复习的旧错题。<b>打钩前先弹确认，误点「取消」进度不变；已完成的可在顶部「已完成 N 项」预览/撤销，跳过延后的在「待补 N 项」里找回。</b></p></div>
     <div id="weekRoot"></div>
   </section>
 
@@ -106,7 +106,7 @@
     </div>
 
     <div id="reviewCardPane" class="hidden">
-      <div class="card wptip"><p class="hint" id="rvIntro">回炉卡：把 94 周执行表里每周的回炉专题按序号排好，标出建议完成周与日期。每一项都<b>列了题目</b>：点「看题目／题意」能看到这个专题是什么意思、怎么认出来、典型例题（带解法答案），以及你已上传的该专题在册错题。回炉＝<b>只做当时错过的题，不看视频</b>，全对才打钩。这里打钩与「本周打卡 → 回炉专题」用的是同一个记录，两边同步。</p></div>
+      <div class="card wptip"><p class="hint" id="rvIntro">回炉卡：94 周执行表里的每周回炉专题按序号排好，另加 <b>2 项补充</b>（分数意义与比较、分数约分与加减——错题集里有但执行表没收），标出建议完成周与日期。每一项都<b>列了题目</b>：点「看题目／题意」能看到这个专题是什么意思、怎么认出来、典型例题（带解法答案），以及你已上传的该专题在册错题。<b>本周只做 3 题</b>（易／中／难各 1）：全对就过关，剩下的同类题不用刷；错 1 道下周只做同类 3 道；错 2 道以上升级重点。打钩标准是<b>这 3 道连对 2 次</b>，计算失误放每日 15 题保温。回炉固定周末 15–20 分钟，到点就停。回炉＝只做当时错过的题，不看视频；94 项主回炉打钩与「本周打卡 → 回炉专题」同步，2 项补充独立打钩。</p></div>
       <div class="overview-summary" id="rvSummary"></div>
       <div class="filter-row">
         <select id="rvRoundFilter"><option value="">全部轮次</option></select>
@@ -144,7 +144,7 @@
 
   <!-- ========== 错题本 ========== -->
   <section class="page" id="page-wrong">
-    <div class="page-head"><h2>错题本</h2><p>1 / 3 / 7 天复习 · 连对 2 次自动移出 · 做错重置周期<br>下方按条件筛选查看全部错题；点上面的「在册错题」可按时间段或专题预览、勾选想重做的题。</p></div>
+    <div class="page-head"><h2>错题本</h2><p>第 1 / 2 / 4 周复习（周末重做）· 连对 2 次自动移出 · 做错重置周期<br>下方按条件筛选查看全部错题；点上面的「在册错题」可按时间段或专题预览、勾选想重做的题。</p></div>
     <div class="btn-row"><button class="btn ghost" data-action="open-wrong-browse">🔍 按时间段 / 专题预览在册错题 · 勾选重做</button></div>
 
     <div class="card">
@@ -293,15 +293,15 @@
 <div class="toast hidden" id="toast"></div>
 <div id="printArea"></div>
 
-<script src="data.js?v27"></script>
-<script src="weekplan.js?v27"></script>
-<script src="path.js?v27"></script>
-<script src="topics.js?v27"></script>
-<script src="calcguide.js?v27"></script>
-<script src="classify.js?v27"></script>
-<script src="variants.js?v27"></script>
-<script src="calendar.js?v27"></script>
-<script src="sync.js?v27"></script>
-<script src="app.js?v27"></script>
+<script src="data.js?v31"></script>
+<script src="weekplan.js?v31"></script>
+<script src="path.js?v31"></script>
+<script src="topics.js?v31"></script>
+<script src="calcguide.js?v31"></script>
+<script src="classify.js?v31"></script>
+<script src="variants.js?v31"></script>
+<script src="calendar.js?v31"></script>
+<script src="sync.js?v31"></script>
+<script src="app.js?v31"></script>
 </body>
 </html>

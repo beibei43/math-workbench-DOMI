@@ -6,7 +6,7 @@
 const $  = s => document.querySelector(s);
 const $$ = s => Array.prototype.slice.call(document.querySelectorAll(s));
 const D  = window.APP_DATA;
-const APP_VER = 'v27';   /* 界面上可见的版本号：更新后数字变了，说明新文件已生效 */
+const APP_VER = 'v31';   /* 界面上可见的版本号：更新后数字变了，说明新文件已生效 */
 const GUIDE = window.TOPIC_GUIDE || {};
 const CALC = window.CALC_GUIDE || {};
 const TASKS = D.tasks;
@@ -405,7 +405,20 @@ function norm(a){
 }
 const isRight=(given,ans)=>norm(given)===norm(ans);
 
-/* ---------------- 错题与 1/3/7 复习 ---------------- */
+/* ---------------- 错题与复习节奏 ----------------
+   v30：家长周末统一录上周错题，复习改成按周——第 1 / 2 / 4 周的周末重做一次，连对 2 次毕业。
+   老数据（day=1/3/7 天）原样保留，只给新错题用新的按周节奏。 */
+const RV_INTERVALS=[1,2,4];   /* 单位：周 */
+function reviewWeekLabel(r){ return r&&r.unit==='week'?`第 ${r.week} 周`:`第 ${r.day} 天`; }
+/* 复习日统一对齐到周末（周日）：录入当天若是周日就当天起算，否则顺延到本周日；再按 1/2/4 周排。这样所有重做都落在周末。 */
+function reviewAnchor(d){
+  const day=new Date(d+'T00:00:00').getDay();   /* 0=周日 */
+  return addDays(d,(7-day)%7);
+}
+function mkReviews(d){
+  const base=reviewAnchor(d||TODAY());
+  return RV_INTERVALS.map(w=>({unit:'week',week:w,day:w*7,due:addDays(base,w*7),done:null,ok:null}));
+}
 /* 计算题的 tag 是「小数加减」这类知识点名，筛「所属专题」时要归回对应专题 */
 const CALC2TOPIC = { '小数加减':'小数计算','小数乘法':'小数计算','小数除法与四则':'小数计算','小数综合':'小数计算',
   '式与方程':'方程','数论基础':'数论','分数意义与约分通分':'分数计算','分数加减':'分数计算','分数乘除与混合':'分数计算',
@@ -418,16 +431,15 @@ function topicTagOf(m){
   if(CALC2TOPIC[t]) return CALC2TOPIC[t];
   return '综合';
 }
-function mkReviews(d){ return [1,3,7].map(day=>({day:day,due:addDays(d,day),done:null,ok:null})); }
 function addMistake(o){
-  const d=o.date||TODAY();   /* 补录：按家长选的那天记错题，1/3/7 天也从那天算 */
+  const d=o.date||TODAY();   /* 补录：按家长选的那天记错题；周末录入上周的题时，这里填实际做题日，复习从那天顺延 1/2/4 周 */
   const m={ id:uid(), date:d, taskId:o.taskId||'', stage:o.stage||'', tag:o.tag||'综合',
     topicTag:topicTagOf({tag:o.tag,topicTag:o.topicTag}), source:o.source||'', type:o.type||'calc',
     question:o.question||'', imageKey:o.imageKey||'', fileKey:o.fileKey||'', fileName:o.fileName||'', fileType:o.fileType||'',
     /* v22：整份文件合集 —— 一条记录代表某个专题的一整份文件，fileSeq 是该专题下按上传顺序的编号 */
     fileBatch:!!o.fileBatch, fileSeq:o.fileSeq||0,
     childAnswer:o.childAnswer||'', correctAnswer:o.correctAnswer||'',
-    reason:o.reason||'思路错误', note:o.note||'', cycleStart:d, reviews:mkReviews(d), streak:0, status:'active', history:[] };
+    reason:o.reason||'思路错误', note:o.note||'', cycleStart:d, reviews:mkReviews(activeDate()), streak:0, status:'active', history:[] };
   S.mistakes.unshift(m); save(); return m;
 }
 /* 当场选错因：判分 / 判错的那一刻就把下拉摆出来，选完即时写回错题本，
@@ -1271,7 +1283,7 @@ function renderWrong(){
     const due=isDue(m), next=dueOf(m);
     const cyc=(m.reviews||[]).map(r=>{
       const cl=r.ok===true?'ok':(r.ok===false?'fail':(due&&r.due===next?'due':''));
-      return `<i class="${cl}" title="第${r.day}天 ${r.due}">${r.day}</i>`;
+      return `<i class="${cl}" title="${reviewWeekLabel(r)} ${r.due}">${r.unit==='week'?'W'+r.week:r.day}</i>`;
     }).join('');
     return `<div class="wrong-card ${m.status==='graduated'?'grad':''}" data-action="view-wrong" data-id="${esc(m.id)}">
       <div class="whead">
@@ -1696,7 +1708,7 @@ function openAttachSheet(){
   openSheet('上传附件 · 整份错题归档', `
     <div class="card">
       <h3>一次上传一整份错题</h3>
-      <p class="hint">试卷、错题合集、PDF、Word、图片都行。选好专题后存进「专题题库」，也可以同时放进错题本，按 1 / 3 / 7 天推给孩子重做。<b>不绑定当天任务，也不影响任务达标。</b></p>
+      <p class="hint">试卷、错题合集、PDF、Word、图片都行。选好专题后存进「专题题库」，也可以同时放进错题本，按第 1 / 2 / 4 周的周末排重做。<b>不绑定当天任务，也不影响任务达标。</b></p>
       <div class="btn-row"><button class="btn ghost" data-action="attach-pick">📎 选择附件</button></div>
       <input type="file" id="attachFile" hidden>
       <div id="attachInfo" class="attach-info">还没选文件</div>
@@ -1708,11 +1720,11 @@ function openAttachSheet(){
       <input type="number" id="attachCount" min="1" max="30" value="1">
       <label class="lbl">备注（可不填）</label>
       <input type="text" id="attachNote" placeholder="例如：三下第一单元测验卷，第 3、7 题错得多">
-      <label class="switch"><input type="checkbox" id="attachToWrong" checked><span>同时加入错题本（按 1/3/7 天推送重做）</span></label>
+      <label class="switch"><input type="checkbox" id="attachToWrong" checked><span>同时加入错题本（按第 1/2/4 周周末重做）</span></label>
       <div id="attachReasonWrap">
         <label class="lbl">这批题主要错在哪</label>
         <select id="attachReason">${D.reasons.map(r=>`<option value="${esc(r)}" ${r==='思路错误'?'selected':''}>${esc(r)}</option>`).join('')}</select>
-        <p class="hint">多道题会「一天一题」错开首次复习日，避免同一天全涌过来；每题仍走 1 / 3 / 7 天、连对 2 次移出的规则。</p>
+        <p class="hint">多道题按同一节奏排，周末集中重做；每题走第 1 / 2 / 4 周、连对 2 次移出的规则。</p>
       </div>
       <div class="btn-row"><button class="btn" data-action="attach-save">✓ 保存进专题题库</button></div>
       <p class="hint">📌 附件文件本身只存在<b>上传时用的这台设备</b>（和题目照片一样，不跨设备同步）；文件名、专题、上传日期、关联错题会同步到手机和电脑。</p>
@@ -2171,7 +2183,7 @@ function openWrongBrowse(){
 function openWrongDetail(id){
   const m=S.mistakes.find(x=>x.id===id); if(!m) return;
   const next=dueOf(m), due=isDue(m);
-  const cyc=(m.reviews||[]).map(r=>`<i class="${r.ok===true?'ok':(r.ok===false?'fail':(due&&r.due===next?'due':''))}" title="第${r.day}天 ${esc(r.due)}">${r.day}</i>`).join('');
+  const cyc=(m.reviews||[]).map(r=>`<i class="${r.ok===true?'ok':(r.ok===false?'fail':(due&&r.due===next?'due':''))}" title="${reviewWeekLabel(r)} ${esc(r.due)}">${r.unit==='week'?'W'+r.week:r.day}</i>`).join('');
   openSheet(`${esc(m.stage)} · ${esc(m.tag)} · 错题详情`, `
     <div class="detail-box">
       <h3>错题详情</h3>
@@ -2185,9 +2197,9 @@ function openWrongDetail(id){
       <div class="rowline"><div class="k">错误原因</div><div class="v">${esc(m.reason||'—')}${m.note?'（'+esc(m.note)+'）':''}</div></div>
       <div class="rowline"><div class="k">复习进度</div><div class="v">${m.status==='graduated'?'已移出（连对 2 次）':`在册 · 连对 ${m.streak||0}/2 · 下次 ${next?esc(cnDate(next)):'—'}`}</div></div>
     </div>
-    ${m.status==='active'?`<div class="card"><h3>1 / 3 / 7 天复习</h3>
-      <div class="cycle">${cyc}<span class="next">${due?'今天该复习了':`下次 ${next?esc(cnDate(next)):'—'}`}</span></div>
-      <p class="hint">重做后由家长判定：做对记一次，连对 2 次自动移出；做错重置周期，重新按 1 / 3 / 7 天推送。</p></div>`:''}
+    ${m.status==='active'?`<div class="card"><h3>第 1 / 2 / 4 周复习（周末重做）</h3>
+      <div class="cycle">${cyc}<span class="next">${due?'这周末该复习了':`下次 ${next?esc(cnDate(next)):'—'}`}</span></div>
+      <p class="hint">周末录入上周错题后，第 1 / 2 / 4 周的周末各重做一次。家长判定：做对记一次，连对 2 次自动移出；做错重置，重新按第 1 / 2 / 4 周排。</p></div>`:''}
     <div class="btn-row">
       ${m.status==='active'?`<button class="btn" data-action="redo-one" data-id="${esc(m.id)}">🔁 重做这题</button>`:''}
       <button class="btn" data-action="variants" data-id="${esc(m.id)}">🧠 举一反三（换题再做）</button>
@@ -2253,12 +2265,12 @@ function redoVerdict(id,ok){
   const msg=after.status==='graduated'
     ? '<b>✓ 连对 2 次，已移出在册错题</b><br>这道题结案啦，可以从错题本里翻篇了。'
     : ok ? `<b>✓ 记一次做对（连对 ${after.streak||0}/2）</b><br>下次复习：${dueOf(after)?esc(cnDate(dueOf(after))):'—'}，再做对一次就结案。`
-         : '<b>✕ 又错了，复习周期已重置</b><br>重新按第 1 / 3 / 7 天推送，隔天再来，不用急。';
+         : '<b>✕ 又错了，复习周期已重置</b><br>重新按第 1 / 2 / 4 周的周末排，下周末再来，不用急。';
   const box=$('#redoResult');
   if(box) box.innerHTML=`<div class="redo-result ${ok?'good':'bad'}">${msg}</div>
     <div class="btn-row"><button class="btn" data-action="next-redo">下一题 ›</button>
     <button class="btn ghost" data-action="wrong-browse">← 返回在册列表</button></div>`;
-  toast(ok?'✓ 记一次做对':'已重置复习周期（1/3/7 天重新计算）');
+  toast(ok?'✓ 记一次做对':'已重置复习周期（第 1/2/4 周重新排）');
 }
 function nextRedo(){
   if(!REDO_QUEUE.length){ openWrongBrowse(); return; }
@@ -2285,7 +2297,7 @@ async function exportPrint(){
   const list=filteredMistakes(), pics={};
   for(const m of list) if(m.imageKey) pics[m.id]=await IMG.get(m.imageKey);
   $('#printArea').innerHTML=`<h2 style="font-size:17px;margin:0 0 4px">错题本 · ${TODAY()}</h2>
-    <p style="font-size:12px;color:#666;margin:0 0 12px">共 ${list.length} 题 ｜ 在册 ${activeMistakes().length} ｜ 1/3/7 天复习 · 连对 2 次移出</p>`+
+    <p style="font-size:12px;color:#666;margin:0 0 12px">共 ${list.length} 题 ｜ 在册 ${activeMistakes().length} ｜ 第 1/2/4 周复习 · 连对 2 次移出</p>`+
     list.map((m,i)=>`<div class="wrong-card">
       <div style="font-size:12px;color:#666">${i+1}. ${esc(m.date)} ｜ ${esc(m.stage)} ｜ ${esc(m.tag)} ｜ ${esc(m.reason)} ｜ ${m.type==='calc'?'计算题':'应用题'}</div>
       <div style="font-size:14px;margin:6px 0">${esc(m.question||'（题目见图片）')}</div>
@@ -2627,8 +2639,11 @@ document.addEventListener('click',e=>{
     /* ---- v20 本周打卡 ---- */
     case 'week-video': weekVideoToggle(parseInt(id,10)); break;
     case 'week-video-ok': weekVideoNone(); break;
-    case 'week-calc': weekOpenCalc(id); break;
-    case 'week-calc-done': weekCalcDone(id); break;
+    case 'week-calc': weekOpenCalc(); break;
+    case 'week-calc-done': weekCalcDone(); break;
+    case 'week-calc-undo': weekCalcUndo(); break;
+    case 'week-calc-undo-yes': weekCalcUndoYes(); break;
+    case 'calc-plan': openCalcPlan(); break;
     case 'week-review-done': weekReviewDone(); break;
     case 'week-calc-edit': openWeekCalcEdit(); break;
     case 'week-calcedit-save': weekCalcEditSave(); break;
@@ -2790,7 +2805,7 @@ document.addEventListener('click',e=>{
     case 'word-ocr': runOCR(); break;
     case 'word-verdict': saveWord(el.dataset.v); break;
     case 'review-ok': reviewMistake(id,true); renderAll(); toast('✓ 记一次做对'); break;
-    case 'review-fail': reviewMistake(id,false); renderAll(); toast('已重置复习周期（1/3/7 天重新计算）'); break;
+    case 'review-fail': reviewMistake(id,false); renderAll(); toast('已重置复习周期（第 1/2/4 周重新排）'); break;
     case 'edit-wrong': openWrongEdit(id); break;
     case 'save-wrong-edit': {
       const m=S.mistakes.find(x=>x.id===id); if(!m) break;
@@ -2934,7 +2949,39 @@ function buildReviewTasks(){
   });
   return list;
 }
-const RVTASKS=buildReviewTasks();
+/* v28 · IMA 错题集里有、94 周执行表没收进去的分数类专题。
+   不占用 01→94 主序号，key 独立，不同步「本周打卡」（本周那格对应的是执行表原有专题）。 */
+const RVBONUS=(function(){
+  const spec=[
+    {w:6, title:'分数意义与比较（补充）',
+     intro:'把一个整体平均分成几份，取其中 1 份或几份就是分数。分母相同看分子，分子相同看分母；还要分清「1/2 米」是具体长度，「全程的 5/7」是份数。',
+     signal:'看到「涂色部分用分数表示」「比较两个分数大小」「用去的 1/2 米和剩下的 5/7 哪个长」「同样多的水占杯子 1/4 和 3/4 哪个杯子大」就是这一类。',
+     examples:[
+       {q:'一根绳子用去 1/2 米，还剩这根绳子的 5/7。用去的和剩下的比，哪个长？',
+        sol:['「还剩全程的 5/7」表示把全长平均分成 7 份，剩下 5 份。','用去的占全长 1 − 5/7 = 2/7 份。','2/7 < 5/7，所以剩下的长。','注意：这里的 1/2 米是具体长度，不能直接和 5/7 比大小。'],ans:'剩下的长'},
+       {q:'甲、乙两个杯子盛同样多的水。甲杯的水占杯子的 1/4，乙杯的水占杯子的 3/4。哪个杯子大？',
+        sol:['两杯水一样多。','同样多的水，占杯子的份数越小，说明杯子越大。','1/4 < 3/4，所以甲杯大。'],ans:'甲杯大'},
+       {q:'在横线上填「>」「<」或「=」：5/9 ○ 4/9；3/7 ○ 3/5。',
+        sol:['分母相同比分子：5 > 4，所以 5/9 > 4/9。','分子相同比分母：分母越小分数越大，7 > 5，所以 3/7 < 3/5。'],ans:'5/9 > 4/9；3/7 < 3/5'}]},
+    {w:10, title:'分数约分与加减（补充）',
+     intro:'约分是把分子分母同时除以同一个数，化到不能再约为止；同分母分数相加减，分母不变、分子相加减。',
+     signal:'看到「约分成最简分数」「1/2 + 1/4 = 」这类分数计算题就是这一类。',
+     examples:[
+       {q:'把 21/36、15/45、12/18、20/30 约成最简分数。',
+        sol:['21/36 分子分母同除以 3，得 7/12（7 和 12 互质）。','15/45 同除以 15，得 1/3。','12/18 同除以 6，得 2/3。','20/30 同除以 10，得 2/3。'],ans:'7/12；1/3；2/3；2/3'},
+       {q:'计算：1/2 + 1/4 = ?；3/8 + 1/8 = ?',
+        sol:['1/2 + 1/4 分母不同，先通分：1/2 = 2/4，2/4 + 1/4 = 3/4。','3/8 + 1/8 分母相同，分母不变分子相加：3 + 1 = 4，得 4/8。','4/8 要约分，得 1/2。'],ans:'3/4；1/2'}]}
+  ];
+  return spec.map((s,i)=>{
+    const wk=WPW.find(x=>x.w===s.w)||{};
+    return {no:95+i, w:s.w, key:'W'+pad2(s.w)+'/bonus-review', title:s.title,
+            round:'补充', stage:wk.stage||'补充', start:wk.start||'', due:wk.end||'',
+            how:'周末抽 3 题线下做，连对 2 次再打钩', bonus:true,
+            guide:{intro:s.intro,signal:s.signal,examples:s.examples}};
+  });
+})();
+const RVTASKS=buildReviewTasks().concat(RVBONUS);
+function rvLabel(t){ return t&&t.bonus ? '补充 '+(t.no-94)+' · '+t.title : (t?'第 '+wpSeq(t.no)+' 项 · '+t.title:''); }
 
 /* 回炉专题里 GUIDE 没覆盖的几项，补上「是什么 + 典型例题」，保证每一项都能看懂题意 */
 const RV_EXTRA={
@@ -2959,6 +3006,34 @@ const RV_EXTRA={
        sol:['锯成 5 段要锯 5 − 1 = 4 次。','每次用 20 ÷ 4 = 5 分钟。','锯成 8 段要锯 8 − 1 = 7 次，7 × 5 = 35 分钟。'],ans:'35 分钟'},
       {q:'一根绳子剪了 4 次，剪成的每段都是 3 米。这根绳子原来长多少米？',
        sol:['剪 4 次得到 4 + 1 = 5 段。','5 × 3 = 15 米。'],ans:'15 米'}]},
+  '标数法与递推计数':{intro:'格子图上只能向右或向下走，问从起点到终点有多少条路线：在每个交点写上「左边来的数 + 上边来的数」，一路标到终点。递推计数也是这个思路。',
+    signal:'看到「只能向右或向下走，共有多少种走法」「只能向上或向右爬楼梯」「按顺序递推有多少种」就是标数法。',
+    examples:[
+      {q:'一个 3×2 的方格（横向 3 格、纵向 2 格），从左下角走到右上角，每次只能向右或向上走一步。共有多少条不同的路线？',
+       sol:['在每个交点标数：最下面一行和最左边一列都只能一路走过来，全标 1。','其余交点 = 左边交点的数 + 下面交点的数。','逐格标过去：1、2、3 / 1、3、6 / 1、4、10。','右上角的数就是路线总数。'],ans:'10 条'},
+      {q:'一个 4×4 的方格，从左上角走到右下角，每次只能向右或向下走一步。共有多少条不同路线？',
+       sol:['用标数法，第一行和第一列全标 1。','每个交点 = 左边 + 上面的数，逐行逐列算。','第 5 行第 5 列标到 70。'],ans:'70 条'},
+      {q:'一个 4×3 的方格（横向 4 格、纵向 3 格），从左下角 A 沿格线走到右上角 B，只能向右或向上。途中从 A 向右 2 格、向上 1 格的交点 C 正在修路，不能通过。共有多少条最短路线？',
+       sol:['先把整张网格按标数法标：底边和左边全标 1，其余交点 = 左边 + 下面。','C 点不能通过，把 C 这一格标成 0，当作走不到。','继续往右上标：C 右边那格只能从下面来，C 上面那格只能从左边来，因为 C 是 0。','逐行标到 B：底行 1,1,1,1,1；第二行 1,2,0,1,2；第三行 1,3,3,4,6；顶行 1,4,7,11,17。','也可以反过来算：没障碍时共 35 条，其中经过 C 的有 3 × 6 = 18 条，35 − 18 = 17。'],ans:'17 条（障碍点标 0，再正常标数）'}]},
+  '图形计数':{intro:'数线段、数正方形、数三角形都有固定顺序：先数基本图形，再数由 2 个、3 个……拼成的大图形，最后加起来，做到不重不漏。',
+    signal:'看到「一共有多少条线段」「图中有多少个正方形 / 三角形」「数一数有多少个角」就是图形计数。',
+    examples:[
+      {q:'一条直线上有 5 个点（包括两个端点），一共可以数出多少条线段？',
+       sol:['以最左边点为起点：能连出 4 条。','以第二个点为起点：能连出 3 条（往左的已经数过）。','依次是 4、3、2、1。','4 + 3 + 2 + 1 = 10 条。'],ans:'10 条'},
+      {q:'一个由 4 个小正方形拼成的 2×2 大正方形，图中一共有多少个正方形？',
+       sol:['先数小的：4 个。','再数大的：整个 2×2 的正方形 1 个。','4 + 1 = 5 个。'],ans:'5 个'},
+      {q:'一列火车从甲地到乙地（单程），途中共经过 12 个站。铁路局一共要准备多少种不同的车票？',
+       sol:['注意坑：「途中经过 12 个站」不包括甲乙两端，所以一共有 12 + 2 = 14 个站。','把铁路看成一条线段，14 个站就是线段上的 14 个点；每两个站之间一种票，就等于数这条线段上一共有多少条线段。','基本线段有 14 − 1 = 13 条，总线段数 = 13 + 12 + 11 + … + 2 + 1 = 91。','所以单程要准备 91 种车票。'],ans:'91 种（14 个点两两连线：13+12+…+1）'}]},
+  /* v31：统筹与优化——培优A三下第20讲，空瓶换水/煎蛋最少时间都归这里 */
+  '统筹与优化':{intro:'同样是这些事，怎样安排最省时间、最省次数、最少花钱。核心是「能同时做的就同时做」「能循环用的就循环利用」，不是死算。',
+    signal:'看到「最少要几分钟」「最多能换几瓶」「怎样安排最省时间 / 最省钱」「同时可以做几件」就是统筹与最优化。',
+    examples:[
+      {q:'平底锅一次最多同时煎 2 张饼，每张饼两面都要煎，每面要 3 分钟。煎 3 张饼最少要多少分钟？',
+       sol:['先算总量：3 张饼 × 2 面 = 6 个面，每面 3 分钟；锅一次能煎 2 个面，所以至少要 6 ÷ 2 = 3 次，3 × 3 = 9 分钟。','关键在安排不让锅空着：第 1 次煎饼1正、饼2正（3 分钟）。','第 2 次把饼2翻面，取出饼1换饼3正：煎饼2反、饼3正（3 分钟）。','第 3 次煎饼1反、饼3反（3 分钟）。','一共 9 分钟，锅全程满着，这就是最省。'],ans:'9 分钟（不能直接一张一张煎，那样要 12 分钟）'},
+      {q:'4 个空矿泉水瓶可以换 1 瓶新水。小明有 10 瓶水，喝完的空瓶拿去换，最多能喝到多少瓶水？',
+       sol:['先喝 10 瓶，得到 10 个空瓶。','10 ÷ 4 = 2 瓶余 2 个空瓶，换回 2 瓶水。','喝完这 2 瓶，又有 2 个空瓶，加上剩下 2 个，共 4 个空瓶。','4 ÷ 4 = 1 瓶，再换回 1 瓶水。','喝完剩 1 个空瓶，不够换了。合计 10 + 2 + 1 = 13 瓶。'],ans:'13 瓶（空瓶要一直循环换到不够为止）'},
+      {q:'妈妈烧水要 10 分钟，洗茶杯要 3 分钟，找茶叶要 2 分钟，沏茶要 1 分钟。客人来了最快几分钟能喝上茶？',
+       sol:['先分清哪些事能同时进行：烧水的时候人闲着，可以去洗茶杯、找茶叶。','第 0 分钟开始烧水；这 10 分钟里洗茶杯 3 分钟、找茶叶 2 分钟，共 5 分钟，都在烧水期间做完。','第 10 分钟水开了，茶杯和茶叶也备好，马上沏茶 1 分钟。','总共 10 + 1 = 11 分钟。','如果一件件排队做，要 10 + 3 + 2 + 1 = 16 分钟。'],ans:'11 分钟（烧水的同时洗杯找茶叶）'}]},
   '小学遗留错题（保温不占主线）':{intro:'收口周不学新专题：把小学阶段还留在错题库里的题整体过一遍，连对 2 次的才算真正掌握。',
     signal:'这一项没有固定题型，下面「孩子在册错题」就是这一周要重做的全部内容。',
     examples:[]}
@@ -2966,9 +3041,17 @@ const RV_EXTRA={
 /* 回炉专题 → 专题讲解（是什么/识别信号/典型例题）：先用已有专题库，缺的用补充库 */
 function rvGuideOf(t){
   const key=REVIEW_ALIAS[t.title]||t.title;
-  const g=(GUIDE&&GUIDE[key])||null;
-  if(g&&g.examples&&g.examples.length) return g;
-  return RV_EXTRA[t.title]||RV_EXTRA[key]||g;
+  if(t&&t.bonus&&t.guide) return t.guide;
+  if(RV_EXTRA[t.title]) return RV_EXTRA[t.title];   /* 补充题优先：搭配计数不能冒充最短路线/数线段 */
+  if(RV_EXTRA[key]) return RV_EXTRA[key];
+  return (GUIDE&&GUIDE[key])||null;
+}
+/* v28 · 每周回炉只做 3 题的做法：抽样本周过关，不把整摞错题刷完 */
+function rvHowToHTML(){
+  return `<div class="rv-howto"><b>本周只做 3 题</b>：易 / 中 / 难各挑 1 道。
+    <p>· 3 道全对 → 本周过关，同类剩下的不用刷；错 1 道 → 下周只做同类 3 道；错 2 道以上 → 升级重点，下周做 5 道＋看例题。</p>
+    <p>· <b>打钩标准：这 3 道连对 2 次</b>。只是 24×3 算错这种计算失误，放进每日 15 题保温，不算专题回炉。</p>
+    <p>· 回炉固定在周末 <b>15–20 分钟</b>，到点就停、剩下的顺延，不挤占周一三五的新课和计算。</p></div>`;
 }
 /* 这个专题下家长已经上传、还在册的错题（线下要重做的就是这些） */
 function rvMistakesOf(t){
@@ -2979,6 +3062,7 @@ function rvQuestionsHTML(t){
   const g=rvGuideOf(t)||{}, ex=(g.examples||[]).slice(0,3);
   const ms=rvMistakesOf(t).slice(0,8);
   return `<div class="rv-qbox">
+    ${rvHowToHTML()}
     ${g.intro?`<p class="rv-what"><b>这道题是什么意思：</b>${esc(g.intro)}</p>`:''}
     ${g.signal?`<p class="rv-what"><b>怎么认出它：</b>${esc(g.signal)}</p>`:''}
     ${ex.length?`<h4>典型例题（先看题意，再线下做）</h4>${ex.map((e,i)=>`<div class="rv-ex">
@@ -2995,7 +3079,7 @@ function rvQuestionsHTML(t){
 }
 function rvQuestions(no){
   const t=RVTASKS.find(x=>x.no===no); if(!t) return;
-  openSheet('第 '+wpSeq(no)+' 项 · '+t.title+' · 看题目', `<div class="card">
+  openSheet(rvLabel(t)+' · 看题目', `<div class="card">
     <p class="hint">${esc(t.stage)} · 第 ${t.w} 周 · 建议 ${esc(t.due)} 前完成 · ${t.round==='三轮'?'三轮·重点':t.round}</p>
     ${rvQuestionsHTML(t)}
     <div class="btn-row"><button class="btn" data-action="rv-toggle" data-no="${no}">✓ 做完了，去打钩</button>
@@ -3024,7 +3108,7 @@ function renderReview(){
   const doneN=RVTASKS.filter(t=>rvDone(t,ws)).length;
   const skipN=RVTASKS.filter(t=>rvSkipped(t,ws)).length;
   const sm=$('#rvSummary');
-  if(sm) sm.innerHTML=`<span>回炉专题 <b>${RVTASKS.length}</b></span><span>已打钩 <b>${doneN}</b></span><span>已跳过 <b>${skipN}</b></span><span>完成率 <b>${RVTASKS.length?Math.round(doneN/RVTASKS.length*100):0}%</b></span>`;
+  if(sm) sm.innerHTML=`<span>回炉专题 <b>94</b> + 补充 <b>${RVBONUS.length}</b></span><span>已打钩 <b>${doneN}</b></span><span>已跳过 <b>${skipN}</b></span><span>完成率 <b>${RVTASKS.length?Math.round(doneN/RVTASKS.length*100):0}%</b></span>`;
   let list=RVTASKS.filter(t=>(!fr||t.round===fr)&&(!fs||
       (fs==='done'?rvDone(t,ws):fs==='skip'?rvSkipped(t,ws):!rvDone(t,ws)&&!rvSkipped(t,ws))));
   if(sort==='dueAsc') list=list.slice().sort((a,b)=>a.due.localeCompare(b.due));
@@ -3038,9 +3122,10 @@ function renderReview(){
     const msN=rvMistakesOf(t).length;
     return `<div class="task-item rv-item ${d?'is-done':''} ${sk?'is-skipped':''}" data-action="rv-preview" data-no="${t.no}">
       <button class="tick" data-action="rv-toggle" data-no="${t.no}">${d?'✓':(sk?'⏭':'○')}</button>
-      <div class="body"><b>${wpSeq(t.no)}</b><span class="wk-pill ${t.round==='一轮'?'':'alt'}">${t.round==='三轮'?'三轮·重点':t.round}</span>
+      <div class="body"><b>${t.bonus?'补'+(t.no-94):wpSeq(t.no)}</b><span class="wk-pill ${t.round==='一轮'?'':'alt'}">${t.round==='三轮'?'三轮·重点':(t.bonus?'补充':t.round)}</span>
         <p>${esc(t.title)}</p>
         <p class="ti-calc">第 ${t.w} 周 · 建议 ${esc(cnDate(t.due))} 前完成 · ${esc(t.stage)}</p>
+        ${t.bonus?'<p class="ti-bonus">补充项 · 独立打钩，不占 01→94，也不同步本周</p>':''}
         ${ex?`<p class="ti-ex">例：${esc(clip(ex.q,52))}</p>`:''}
         <button class="linkbtn rv-qbtn" data-action="rv-questions" data-no="${t.no}">看题目 / 题意${msN?' · '+msN+' 道在册错题':''} ›</button>
         ${sk?`<p class="ti-skip">⏭ 已跳过${skObj&&skObj.reason?' · '+esc(skObj.reason):''}</p>`:''}
@@ -3055,8 +3140,8 @@ function rvToggle(no){
   const ws=weekState();
   if(rvDone(t,ws)||rvSkipped(t,ws)){ rvPreview(no); return; }
   const wk=wkAt(t.w)||{};
-  openSheet('回炉卡 · 第 '+wpSeq(no)+' 项', `<div class="card">
-    <p class="hint">回炉＝<b>只做当时错过的题，不看视频</b>；原题重做 → 同类变式 2–3 题 → 全对才打钩。这里打钩会同步到「本周打卡 → 回炉专题」。</p>
+  openSheet('回炉卡 · '+rvLabel(t), `<div class="card">
+    <p class="hint">回炉＝<b>只做当时错过的题，不看视频</b>；<b>3 道代表题连对 2 次</b>再打钩。${t.bonus?'这是补充回炉项，不占 01→94 主序号，独立打钩。':'这里打钩会同步到「本周打卡 → 回炉专题」。'}</p>
     <h3>${esc(t.title)}</h3>
     <p class="hint">${esc(t.stage)} · 第 ${t.w} 周 · 建议 ${esc(t.due)} 前完成</p>
     ${wk.main?`<p class="hint">本周主线：${esc(wk.main)}</p>`:''}
@@ -3073,12 +3158,12 @@ function rvDoneYes(no){
   ws.done[t.key]=activeDate();
   if(ws.skip) delete ws.skip[t.key];
   save(); closeSheet(); renderAll();
-  toast('✓ 回炉第 '+wpSeq(no)+' 项已打钩');
+  toast('✓ '+rvLabel(t)+' 已打钩');
 }
 function rvPreview(no){
   const t=RVTASKS.find(x=>x.no===no); if(!t) return;
   const ws=weekState(), d=rvDone(t,ws), sk=rvSkipped(t,ws), raw=rvDoneRaw(t,ws), skObj=sk?ws.skip[t.key]:null;
-  openSheet('回炉第 '+wpSeq(no)+' 项 · '+(d?'已完成':(sk?'已跳过':'待做')), `<div class="card">
+  openSheet('回炉 · '+rvLabel(t)+' · '+(d?'已完成':(sk?'已跳过':'待做')), `<div class="card">
     <h3>${esc(t.title)}</h3>
     <p class="hint">${esc(t.stage)} · 第 ${t.w} 周 · 建议 ${esc(t.due)} 前完成</p>
     <p class="hint">状态：${d?('✓ 已于 '+esc(String(raw||'').slice(0,16))+' 打钩'):(sk?('⏭ 已跳过 · '+esc(skObj&&skObj.reason||'')+'（'+esc(String(skObj&&skObj.at||'').slice(5))+'）'):'○ 待做')}</p>
@@ -3095,7 +3180,7 @@ function rvPreview(no){
 function rvUndo(no){
   const t=RVTASKS.find(x=>x.no===no); if(!t) return;
   const raw=rvDoneRaw(t,weekState());
-  openSheet('撤销回炉第 '+wpSeq(no)+' 项的打钩？', `<div class="card">
+  openSheet('撤销回炉 · '+rvLabel(t)+' 的打钩？', `<div class="card">
     <h3>${esc(t.title)}</h3><p class="hint">第 ${t.w} 周 · ${esc(t.stage)} · ${esc(String(raw||'').slice(0,16))} 打钩</p>
     <p class="hint">撤销只改这一项的回炉打钩，<b>不影响视频完成、错题上传和每日计算记录</b>。本周打卡里同一项的回炉打钩也会一起取消。</p>
     <div class="btn-row"><button class="btn ghost danger" data-action="rv-undo-yes" data-no="${no}">✓ 确认撤销</button>
@@ -3105,12 +3190,12 @@ function rvUndo(no){
 function rvUndoYes(no){
   const t=RVTASKS.find(x=>x.no===no); if(!t) return;
   const ws=weekState(); delete ws.done[t.key];
-  save(); renderAll(); toast('已撤销回炉第 '+wpSeq(no)+' 项'); rvDoneList();
+  save(); renderAll(); toast('已撤销回炉 · '+rvLabel(t)); rvDoneList();
 }
 function rvSkipOpen(no){
   const t=RVTASKS.find(x=>x.no===no); if(!t) return;
   const ws=weekState(), old=ws.skip&&ws.skip[t.key];
-  openSheet('跳过回炉第 '+wpSeq(no)+' 项 · 写原因', `<div class="card">
+  openSheet('跳过回炉 · '+rvLabel(t)+' · 写原因', `<div class="card">
     <p class="hint">写一个以后看得懂的原因，比如「这块题太少，等错了再回来做」。标 ⏭ 跳过，<b>不算打钩</b>，之后到「待补清单」一键找回。</p>
     <h3>${esc(t.title)}</h3>
     <label class="lbl">跳过原因</label>
@@ -3126,12 +3211,12 @@ function rvSkipSave(no){
   if(!ws.skip) ws.skip={};
   ws.skip[t.key]={reason,at:activeDate()};
   delete ws.done[t.key];
-  save(); closeSheet(); renderAll(); toast('⏭ 回炉第 '+wpSeq(no)+' 项已跳过');
+  save(); closeSheet(); renderAll(); toast('⏭ '+rvLabel(t)+' 已跳过');
 }
 function rvUnskip(no){
   const t=RVTASKS.find(x=>x.no===no); if(!t) return;
   const ws=weekState(); if(ws.skip) delete ws.skip[t.key];
-  save(); closeSheet(); renderAll(); toast('回炉第 '+wpSeq(no)+' 项已恢复为待做');
+  save(); closeSheet(); renderAll(); toast(rvLabel(t)+' 已恢复为待做');
 }
 function rvDoneList(){
   const ws=weekState(), list=RVTASKS.filter(t=>rvDone(t,ws));
@@ -3200,9 +3285,13 @@ function weekCalcDefault(w){
   const wk=wkAt(w); if(!wk) return [{tag:'mixed',n:10}];
   return (wk.calc&&wk.calc.length?wk.calc:[{tag:'mixed',n:10}]).map(c=>({tag:c.tag,n:c.n}));
 }
-function weekCalcCfg(w,ds){
-  const ws=weekState(), k=`W${pad2(w)}/c/${ds}`;
-  return ws.calc[k] || weekCalcDefault(w);
+/* v30：计算改成按周配置——key 用 W##，不再按天。兼容老版本按天存的记录：取该周任意一天的配置做默认。 */
+function weekCalcCfg(w){
+  const ws=weekState(), k=`W${pad2(w)}`;
+  if(ws.calc[k]) return ws.calc[k];
+  const wk=wkAt(w);
+  if(wk){ for(let i=0;i<7;i++){ const ds=addDays(wk.start,i), old=ws.calc[`W${pad2(w)}/c/${ds}`]; if(old) return old; } }
+  return weekCalcDefault(w);
 }
 /* 本周四项打卡（当天四类互不锁，先做哪个都行）：
    ① 本周视频 ② 每日计算（线下买题，只记录内容+打钩，不出题判分）③ 回炉专题（每周一个）④ 周末错题上传
@@ -3212,7 +3301,7 @@ function weekSteps(w){
   const steps=[];
   const vids=(wk.videos||[]).filter(v=>!v.opt);
   if(vids.length) steps.push({kind:'video',key:`W${pad2(w)}/video`,label:'本周视频',n:vids.length});
-  steps.push({kind:'calc',key:`W${pad2(w)}/calc`,label:'每日计算',n:3});
+  steps.push({kind:'calc',key:`W${pad2(w)}/calc`,label:'本周计算',n:1});
   steps.push({kind:'review',key:`W${pad2(w)}/review`,label:'回炉专题',n:1});
   steps.push({kind:'upload',key:`W${pad2(w)}/upload`,label:'周末错题上传',n:1});
   if(wk.test) steps.push({kind:'gate',key:`W${pad2(w)}/gate`,label:'阶段达标测试',n:1});
@@ -3224,10 +3313,8 @@ function stepDone(ws,w,st){
     return vids.length>0 && vids.every((v,i)=>!!ws.done[`W${pad2(w)}/v${i}`]);
   }
   if(st.kind==='calc'){
-    const wk=wkAt(w)||{};
-    let doneD=0;
-    for(let i=0;i<7;i++){ const ds=addDays(wk.start,i); if(ws.done[`W${pad2(w)}/c/${ds}`]) doneD++; }
-    return doneD>=3;
+    /* v30：计算按周打卡——线下本子每天 2 页，家长只按本周打钩一次 */
+    return !!ws.done[st.key];
   }
   return !!ws.done[st.key];
 }
@@ -3263,7 +3350,7 @@ function mistakeRef(m){
   if(m.fileBatch) return `《${fileBatchName(topicTagOf(m),m.fileSeq)}》文件`+(m.fileName?`（${m.fileName}）`:'');
   return esc(clip(m.question||m.fileName||'（见附件）',46));
 }
-/* 周末复盘：按 1/3/7 到期的题，按专题分组，提醒家长线下找出重做。
+/* 周末复盘：按第 1/2/4 周到期的题，按专题分组，提醒家长线下找出重做。
    包含之前累积到期的题（不只本周新传的）。 */
 function weekendReviewHTML(w){
   const due=dueMistakes();
@@ -3271,13 +3358,13 @@ function weekendReviewHTML(w){
   const thisWeekNew=(S.mistakes||[]).filter(m=>m.date>=wStart&&m.date<=wEnd).length;
   if(!due.length){
     return `<div class="wk-memo"><div class="wm-h">🔁 周末复习提醒<span>${thisWeekNew} 道本周新错题</span></div>
-      <p class="hint">目前没有到期的旧错题。新传的错题会在第 1 / 3 / 7 天自动出现在这里提醒你线下重做。</p></div>`;
+      <p class="hint">目前没有到期的旧错题。周末录入上周错题后，会在第 1 / 2 / 4 周的周末出现在这里提醒你线下重做。</p></div>`;
   }
   const groups={};
   due.forEach(m=>{ const t=topicTagOf(m); (groups[t]=groups[t]||[]).push(m); });
   const gkeys=Object.keys(groups).sort((a,b)=>groups[b].length-groups[a].length);
   return `<div class="wk-memo"><div class="wm-h">🔁 周末复习提醒<span>到期 ${due.length} 道 · 本周新传 ${thisWeekNew} 道</span></div>
-    <p class="hint">除了本周新错题，这些是之前错了、按 <b>1 / 3 / 7 天</b>记忆曲线今天该再复习的。按下面的「专题 + 序号/题」线下找出来给孩子重做，回来点结果：连对 2 次移出，又错则重新排期。</p>
+    <p class="hint">除了本周新错题，这些是之前错了、按 <b>第 1 / 2 / 4 周</b>的周末该再复习的。按下面的「专题 + 序号/题」线下找出来给孩子重做，回来点结果：连对 2 次移出，又错则重新排期。</p>
     ${gkeys.map(t=>`<div class="wm-grp"><div class="wm-grp-h">${esc(t)} <small>${groups[t].length} 道</small></div>
       ${groups[t].map(m=>`<div class="wm-item"><span>${mistakeRef(m)}</span>
         <span class="wm-btns"><button class="btn tiny ghost" data-action="review-ok" data-id="${esc(m.id)}">做对了</button><button class="btn tiny ghost" data-action="review-fail" data-id="${esc(m.id)}">又错了</button></span></div>`).join('')}</div>`).join('')}
@@ -3430,17 +3517,20 @@ function weekStepBody(w,st,unlocked,done){
       <p class="hint">序号只是执行表顺序，<b>不强制</b>：先学哪讲、要不要跳过都由你定。不想现在学的点那一项选「先跳过」并写原因，会标 ⏭，建议项自动往后走。看完让孩子用 1 句话复述讲了什么。已学过又做错的回炉专题直接做错题，不用重看整讲。</p>`;
   }
   if(st.kind==='calc'){
-    const days=[];
-    for(let i=0;i<7;i++){ const ds=addDays(wk.start,i); const d=ws.done[`W${pad2(w)}/c/${ds}`];
-      const dow=['日','一','二','三','四','五','六'][new Date(ds+'T00:00:00').getDay()];
-      const cfg=weekCalcCfg(w,ds), txt=weekCalcText(w,ds);
-      days.push(`<div class="wk-cday ${d?'ok':''}"><div class="wcd-top"><b>周${dow}</b><small>${ds.slice(5)}</small></div>
-        <div class="wcd-tags">${txt?`<span>${esc(txt)}</span>`:cfg.map(c=>`<span>${esc(calcName(c.tag))} ${c.n}题</span>`).join('')}</div>
-        <button class="btn tiny ${d?'ghost':''}" data-action="week-calc" data-id="${ds}">${d?'✓ '+cnDate(d):'记录并打钩'}</button></div>`);
-    }
-    return `<p class="hint">线下买的计算题，每天做完在这里<b>填今天做了什么 + 打钩</b>即可，不用在线做题、也不用再录答案。本周至少完成 3 天（周一三五）即算达标，多做的都记下来。</p>
-      <div class="wk-cgrid">${days.join('')}</div>
-      <div class="btn-row"><button class="btn ghost" data-action="week-calc-edit">调整本周计算内容</button></div>`;
+    /* v30：按周提示「这周做哪类计算」；线下本子每天 2 页，家长按周打钩一次 */
+    const done=ws.done[st.key];
+    const cfg=weekCalcCfg(w), txt=weekCalcText(w);
+    const types=cfg.map(c=>`<span class="wk-ctype">${esc(calcName(c.tag))}${c.n?' <small>'+c.n+' 题</small>':''}</span>`).join('');
+    const note=txt?`<p class="wk-cnote">家长备注：${esc(txt)}</p>`:'';
+    return `<div class="wk-cweek ${done?'ok':''}">
+      <div class="wkw-head"><b>本周做：</b>${types||'<span class="wk-ctype">按计算工具链推进</span>'}</div>
+      <p class="hint">线下买的计算本，<b>每天做 2 页</b>（照上面的类型买对应练习），做完<b>本周打钩一次</b>即可。不用在线做题、不用录答案。周末统一把计算错题录进错题本。</p>
+      ${note}
+      <div class="btn-row">
+        <button class="btn ${done?'ghost':''}" data-action="week-calc">${done?'✓ '+cnDate(done)+' 已完成 · 查看/撤销':'✓ 本周计算做完了，打钩'}</button>
+        <button class="btn ghost" data-action="calc-plan">📅 看后面几周做哪些计算</button>
+        <button class="btn ghost" data-action="week-calc-edit">调整本周计算类型</button>
+      </div></div>`;
   }
   if(st.kind==='review'){
     const names=reviewTopics(w), list=reviewMistakes(w), d=ws.done[`W${pad2(w)}/review`];
@@ -3484,39 +3574,72 @@ function weekVideoNone(){
   if(vids.length) return;
   ws.done[`W${pad2(w)}/video`]=activeDate(); save(); renderAll(); toast('✓ 已确认');
 }
-/* 每日计算：线下买题做，工作台只记录「今天做了什么」+打钩，不出题、不判分、不录答案。
-   内容存在 ws.calc[W##/c/日期]（数组 [{tag,n,text}]），text 是家长填的实际题单说明。 */
-function weekCalcText(w,ds){
-  const cfg=weekCalcCfg(w,ds);
+/* v30：按周计算——线下本子每天 2 页，工作台只提示「这周做哪类」+ 家长按周打钩。
+   配置/key 都用 W##。打钩先确认、已完成点开＝预览、撤销二次确认（v23 口径）。 */
+function weekCalcText(w){
+  const cfg=weekCalcCfg(w);
   return cfg.filter(c=>c.text).map(c=>c.text).join('、')||'';
 }
-function weekOpenCalc(ds){
-  const w=wkViewWeek(), ws=weekState(), cfg=weekCalcCfg(w,ds);
-  const d=ws.done[`W${pad2(w)}/c/${ds}`];
-  const suggest=cfg.map(c=>calcName(c.tag)+' '+c.n+'题').join('、');
-  const cur=weekCalcText(w,ds);
-  openSheet(`第 ${w} 周 · ${cnDate(ds)} · 每日计算`, `
-    <div class="card"><p class="hint">线下买的计算题，做完在这里记一句「今天做了什么」再打钩即可。<b>不用在线做题，也不用录每题答案。</b>本周至少 3 天打钩算达标。</p>
-      <label class="lbl">今天做的计算内容</label>
-      <input type="text" id="wccText" value="${esc(cur||suggest)}" placeholder="例如：口算本 P12 小数乘法 20 题 + 竖式 10 题">
-      <p class="hint">建议（按本周执行表题型）：${esc(suggest||'按本周计算安排')}</p>
+function wkCalcLabel(w){ const t=weekCalcCfg(w).map(c=>calcName(c.tag)).join('、'); return t||'本周计算'; }
+function weekOpenCalc(){
+  const w=wkViewWeek(), ws=weekState(), key=`W${pad2(w)}/calc`;
+  const d=ws.done[key];
+  const cfg=weekCalcCfg(w), suggest=cfg.map(c=>calcName(c.tag)+(c.n?' '+c.n+'题':'')).join('、')||'按计算工具链推进';
+  if(d){
+    /* 已完成：预览详情，不直接改状态 */
+    openSheet(`第 ${w} 周 · 本周计算 · 已完成`, `
+      <div class="card"><p class="hint">✅ 已于 <b>${esc(d)}</b> 打钩。本周计算类型：<b>${esc(suggest)}</b>。</p>
+        ${weekCalcText(w)?`<p class="hint">家长备注：${esc(weekCalcText(w))}</p>`:''}
+        <div class="btn-row"><button class="btn ghost" data-action="week-calc-undo">撤销本周打钩</button>
+          <button class="btn ghost" data-action="close-sheet">关闭</button></div></div>`);
+    return;
+  }
+  openSheet(`第 ${w} 周 · 本周计算 · 确认打钩`, `
+    <div class="card"><p class="hint">线下买的计算本，<b>每天做 2 页</b>。本周类型：<b>${esc(suggest)}</b>。确认孩子这周都做完了再打钩。</p>
+      <label class="lbl">家长备注（可不填，如「P20–P23 小数乘法」）</label>
+      <input type="text" id="wccText" value="${esc(weekCalcText(w))}" placeholder="例如：计算本 P20–P23，每天 2 页">
       <div class="btn-row">
-        <button class="btn" data-action="week-calc-done" data-id="${ds}">${d?'✓ 已打钩 · 保存并取消打钩':'✓ 做完了，打钩'}</button>
-        <button class="btn ghost" data-action="close-sheet">关闭</button></div>
+        <button class="btn" data-action="week-calc-done">✓ 确认完成，打钩</button>
+        <button class="btn ghost" data-action="close-sheet">取消</button></div>
     </div>`);
 }
-function weekCalcDone(ds){
-  const w=wkViewWeek(), ws=weekState(), key=`W${pad2(w)}/c/${ds}`;
+function weekCalcDone(){
+  const w=wkViewWeek(), ws=weekState(), key=`W${pad2(w)}/calc`;
+  if(ws.done[key]){ toast('本周已经打过钩了；要改请先撤销'); return; }
   const txt=($('#wccText')&&$('#wccText').value.trim())||'';
-  if(txt){
-    const cfg=weekCalcCfg(w,ds).map(c=>Object.assign({},c));
-    if(cfg.length) cfg[0].text=txt; else cfg.push({tag:'mixed',n:0,text:txt});
-    ws.calc[key]=cfg;
-  }
-  if(ws.done[key]){ delete ws.done[key]; toast('已取消这一天的打钩'); }
-  else ws.done[key]=activeDate();
-  save(); closeSheet(); renderAll();
-  if(ws.done[key]) toast('✓ 这一天计算已记录并打钩');
+  const cfg=weekCalcCfg(w).map(c=>Object.assign({},c));
+  if(txt){ if(cfg.length) cfg[0].text=txt; else cfg.push({tag:'mixed',n:0,text:txt}); }
+  ws.calc[`W${pad2(w)}`]=cfg;
+  ws.done[key]=activeDate();
+  save(); closeSheet(); renderAll(); toast('✓ 本周计算已打钩');
+}
+function weekCalcUndo(){
+  const w=wkViewWeek(), ws=weekState(), key=`W${pad2(w)}/calc`;
+  if(!ws.done[key]) return;
+  openSheet(`撤销第 ${w} 周计算打钩？`, `
+    <div class="card"><p class="hint">撤销只改这一项的计算打钩，<b>不影响视频、回炉专题、错题和达标率</b>。撤销后可重新打钩。</p>
+      <div class="btn-row"><button class="btn" data-action="week-calc-undo-yes">确认撤销</button>
+        <button class="btn ghost" data-action="close-sheet">取消</button></div></div>`);
+}
+function weekCalcUndoYes(){
+  const w=wkViewWeek(), ws=weekState(), key=`W${pad2(w)}/calc`;
+  delete ws.done[key]; save(); closeSheet(); renderAll(); toast('已撤销本周计算打钩');
+}
+/* v30：预览未来每周的计算安排——按执行表 94 周列出「这周做哪类计算」 */
+function openCalcPlan(){
+  const cur=wpCurWeek();
+  const rows=WPW.map(w=>{
+    const cfg=(w.calc&&w.calc.length?w.calc:[{tag:'mixed',n:10}]);
+    const types=cfg.map(c=>`${esc(calcName(c.tag))}${c.n?' <small>'+c.n+' 题</small>':''}`).join('、');
+    return `<div class="cp-row ${w.w===cur?'iscur':''} ${w.w<cur?'past':''}">
+      <span class="cp-w">W${pad2(w.w)}</span>
+      <span class="cp-types">${types}</span>
+      <span class="cp-date">${esc(w.start.slice(5))}</span></div>`;
+  }).join('');
+  openSheet('未来每周计算安排 · 94 周执行表', `
+    <div class="card"><p class="hint">这是执行表给每周安排的计算类型（线下本子每天 2 页）。<b>可以提前按类型买练习本</b>：同一类可以买一本，跨几周接着做。家长也能在每周卡片里「调整本周计算类型」。</p>
+      <div class="cp-legend"><span>W = 周次</span><span>右侧是计划起始日</span><span class="hot">高亮＝建议当前周</span></div>
+      <div class="cp-list">${rows}</div></div>`);
 }
 function weekReviewDone(){
   const ws=weekState(), w=wkViewWeek(), key=`W${pad2(w)}/review`;
@@ -3541,7 +3664,7 @@ function weekOpenUpload(){
   const calcNames=Object.keys(D.calcTagNames||{}).map(k=>D.calcTagNames[k]);
   openSheet('上传本周错题', `
     <div class="card"><h3>把本周孩子做错的题录进来</h3>
-      <p class="hint">这是<b>给家长记录用</b>的工作台。两种方式：单题拍照/打字，或整份文件一次传（某个专题的错题合集，不用一题一题录）。录进来后按 1 / 3 / 7 天提醒你线下找出来重做；连对 2 次移出，二轮学到对应专题再出现。</p>
+      <p class="hint">这是<b>给家长记录用</b>的工作台。两种方式：单题拍照/打字，或整份文件一次传（某个专题的错题合集，不用一题一题录）。建议周末统一录上周错题，录进来后按第 1 / 2 / 4 周的周末提醒你线下找出来重做；连对 2 次移出，二轮学到对应专题再出现。</p>
       <div class="seg" id="wuMode"><button class="seg-b on" data-action="week-up-mode" data-v="single">📷 单题拍照 / 输入</button><button class="seg-b" data-action="week-up-mode" data-v="file">📄 整份文件合集</button></div>
       <div id="wuSingle"></div><div id="wuFileBody" class="hidden"></div>
     </div>`);
@@ -3617,7 +3740,7 @@ async function weekFileSave(){
     fileKey:key,fileName:WK_UP.file.name||name,fileType:WK_UP.file.type||'',fileBatch:true,fileSeq:seq,
     reason:'待线下重做判定',note:note});
   const ws=weekState(), vw=wkViewWeek(); WK_VIEW=null; ws.done[`W${pad2(vw)}/upload`]=activeDate();
-  save(); closeSheet(); renderAll(); toast('✓ 已存为《'+name+'》，按 1 / 3 / 7 天排进复习提醒');
+  save(); closeSheet(); renderAll(); toast('✓ 已存为《'+name+'》，按第 1 / 2 / 4 周的周末排进复习提醒');
 }
 function renderWeekUploadCats(){
   const box=$('#wuCatBox'); if(!box||!WK_UP) return;
@@ -3642,19 +3765,19 @@ function weekUploadSave(){
     childAnswer:($('#wuChild')&&$('#wuChild').value.trim())||'',correctAnswer:($('#wuCorrect')&&$('#wuCorrect').value.trim())||'',
     reason:($('#wuReason')&&$('#wuReason').value)||'思路错误',note:($('#wuNote')&&$('#wuNote').value.trim())||''});
   const ws=weekState(), vw=wkViewWeek(); WK_VIEW=null; ws.done[`W${pad2(vw)}/upload`]=activeDate();
-  save(); closeSheet(); renderAll(); toast('✓ 已存入错题本，之后每天会排重做');
+  save(); closeSheet(); renderAll(); toast('✓ 已存入错题本，之后第 1 / 2 / 4 周的周末会提醒重做');
 }
-/* 每日题型/题量编辑 */
+/* 本周计算类型/题量编辑（v30：按周，不再按天） */
 function openWeekCalcEdit(){
   const w=wkViewWeek();
   const allTags=Object.keys(D.calcTagNames||{});
-  openSheet(`第 ${w} 周 · 调整每日计算`, `
-    <div class="card"><p class="hint">这一周每天做的计算类型和题量。可以只留 1 类，也可以加几类；家长按孩子情况改。改完这一周每天都按这个来。</p>
+  openSheet(`第 ${w} 周 · 调整本周计算`, `
+    <div class="card"><p class="hint">这一周计算本要做的类型和题量。可以只留 1 类，也可以加几类；家长按孩子情况改。线下每天做 2 页。</p>
       <div id="wceRows"></div>
       <div class="btn-row"><button class="btn ghost" data-action="week-calcedit-add">+ 加一类</button></div>
       <div class="btn-row"><button class="btn" data-action="week-calcedit-save">保存这一周的设置</button></div>
     </div>`);
-  WK_EDIT=weekCalcDefault(w).map(c=>({tag:c.tag,n:c.n}));
+  WK_EDIT=weekCalcCfg(w).map(c=>({tag:c.tag,n:c.n}));
   renderCalcEditRows(allTags);
 }
 let WK_EDIT=[];
@@ -3671,8 +3794,8 @@ function weekCalcEditSave(){
     const ts=document.querySelector(`[data-wce-tag="${i}"]`), ns=document.querySelector(`[data-wce-n="${i}"]`);
     if(ts) c.tag=ts.value; if(ns) c.n=clamp(parseInt(ns.value,10)||10,1,60);
   });
-  for(let i=0;i<7;i++){ const ds=addDays((wkAt(w)||{start:TODAY()}).start,i); ws.calc[`W${pad2(w)}/c/${ds}`]=WK_EDIT.map(c=>({tag:c.tag,n:c.n})); }
-  save(); closeSheet(); renderAll(); toast('✓ 这一周的计算设置已保存');
+  ws.calc[`W${pad2(w)}`]=WK_EDIT.map(c=>({tag:c.tag,n:c.n}));
+  save(); closeSheet(); renderAll(); toast('✓ 本周计算类型已保存');
 }
 
 /* 周切换（仅看视图，不改任务进度）/ 家长强制确认当前项 */
